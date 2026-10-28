@@ -1201,9 +1201,15 @@ body[data-ds-dark-theme] .ev-btn.on{background:var(--br);border-color:var(--br);
 
     ctx.effect(() => () => { if (cssDisposer) cssDisposer() })
 
-    slots.inject('conversation.view', () => slots.register(
-      { name: 'conversation.view', id: 'ascend-evolve', order: 22, label: '自演进' },
-      (props) => React.createElement(BoardView, props),
-    ))
+    // 自演进看板读的是全库的卡与体检判决，与当前会话无关：常驻包把它交给整页「Ascend Sleuth」
+    // （dsh-plugins/sleuth-console）；动态热加载路径没有整页容器，退回 conversation.view tab。
+    if (typeof SLEUTH_VIEWS !== 'undefined' && SLEUTH_VIEWS !== null) {
+      SLEUTH_VIEWS.evolve = (props) => React.createElement(BoardView, props)
+    } else {
+      slots.inject('conversation.view', () => slots.register(
+        { name: 'conversation.view', id: 'ascend-evolve', order: 22, label: '自演进' },
+        (props) => React.createElement(BoardView, props),
+      ))
+    }
   },
 }

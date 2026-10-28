@@ -1,12 +1,16 @@
 /* eslint-disable */
 // 生成物 —— 勿手改。由 `node scripts/build_panel_bundle.js` 从下列源文件拼出：
-//   dsh-plugins/ascend-panel/panel-client.js  (sha256:9364b3406024)
-//   dsh-plugins/ev-panel/panel-client.js  (sha256:9e836d4c1993)
+//   dsh-plugins/ascend-panel/panel-client.js  (sha256:e49ebe32cd18)
+//   dsh-plugins/ev-panel/panel-client.js  (sha256:f684735469ce)
+//   dsh-plugins/sleuth-console/console-client.js  (sha256:119062e6c579)
 // 校验：`node scripts/build_panel_bundle.js --check`。
 //
 // 面板源码是动态插件方言（靠沙箱提供的 host 通信）；这里原文嵌入页面产物，并补一层适配：
 // host.call(name, args) → ctx.get('connection').rpc.call(CHANNEL, name, args)。
 // React 由页面的模块表提供（与宿主同一份，不重复安装）。
+//
+// SLEUTH_VIEWS 是三个源文件之间的登记表：两个面板把视图写进去，sleuth-console 的整页
+// 按 id 取来渲染。动态热加载路径没有这个对象，面板因此退回 conversation.view 的 tab。
 window.__ModuleLoader__.load({
   id: 'dsh-sleuth-panels',
   factory: (require) => {
@@ -58,12 +62,15 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // 面板视图登记表（见文件头）：面板 apply 时写入，sleuth-console 的整页读取。
+    const SLEUTH_VIEWS = {}
+
     const PANELS = [
     {
       id: 'ascend-panel',
       build(host, styles) {
         return (function () {
-// ---- dsh-plugins/ascend-panel/panel-client.js (sha256:9364b3406024) 原文开始 ----
+// ---- dsh-plugins/ascend-panel/panel-client.js (sha256:e49ebe32cd18) 原文开始 ----
 return {
   apply(ctx) {
     const slots = ctx.get('slots')
@@ -224,6 +231,14 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
 .sleu-fold-compact .sleu-fold-body{padding:6px 0 0}
 .sleu-fold-body>div:first-child>.sleu-block:first-child,.sleu-fold-body>.sleu{margin-top:0}
 @media (prefers-reduced-motion: reduce){.sleu,.sleu *{animation-duration:.001ms !important;animation-delay:0ms !important;transition-duration:.001ms !important}}
+/* 会话行的「待回报」标记（L2 行首空心点 + L1 悬停卡一行）。
+   为什么是空心点：侧栏自己的状态点是实心（运行中/完成/未读），空心与它区分开——这是
+   "欠账"，不是"会话在跑"。颜色用 amber（需处理，不是错误）。 */
+.sleu-row-dot{display:inline-block;width:6px;height:6px;border-radius:999px;border:1.4px solid var(--acc-amber);box-sizing:border-box;vertical-align:middle}
+/* 悬停卡很窄：标题一行（欠多久）、细节一行（自哪天 + 等什么），超长换行不截字 */
+.sleu-hover-mark{display:flex;flex-direction:column;gap:1px;margin-top:3px;font-size:var(--t-sm);line-height:var(--lh-base)}
+.sleu-hover-title{color:var(--c-amber);font-weight:600}
+.sleu-hover-detail{color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
 `
     const tokenSheet = styles.insert(PANEL_CSS)
 
@@ -277,7 +292,7 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
     // 构建时注入的面板包版本（`scripts/build_panel_bundle.js` 把占位符换成 package.json 的 version）。
     // 为什么要有：面板是「装进 profile 的常驻插件 + 浏览器按 rev 缓存」两层，改完看不到新版时
     // 无法区分"装的还是旧包"与"浏览器缓存了旧 bundle"。有这个串，一眼就能判。
-    const PANEL_VERSION = '0.6.17'
+    const PANEL_VERSION = '0.7.4'
 
     function shortUrl(u) {
       const s = String(u).replace(/^https?:\/\//i, '')
@@ -3794,13 +3809,128 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
     }
 
 
+    // ── 会话行的「待回报」标记：L2 行首空心点 + L1 悬停卡一行 ──────────────────────
+    //
+    // 数据只有一条瘦 RPC（`ascend-session-marks`）：哪几个会话欠回报、欠了多久、命中哪个 case。
+    // 侧栏每行都渲染这两个组件，所以取数**必须共享**：模块级一份状态 + 一处在途请求，
+    // N 行只读同一次结果。逐行发请求会把 RPC 打成筛子（几百行），这是设计约束不是优化。
+    //
+    // 刷新：首次挂载取一次，30 秒内复用（与面板的复用窗口同一量级）；过期后下一次挂载再取。
+    // 取不到时**保留上一次结果**：清空会把"读不到"显示成"没有欠账"。
+    const MARK_TTL_MS = 30000
+    const markState = { at: 0, marks: Object.create(null) }
+    const markWaiters = new Set()
+    let markRequest = null
+
+    function refreshMarks(force) {
+      const fresh = !force && markState.at > 0 && (Date.now() - markState.at) < MARK_TTL_MS
+      if (fresh) return Promise.resolve()
+      if (markRequest !== null) return markRequest
+      markRequest = host.call('ascend-session-marks', {})
+        .then((r) => {
+          if (r && r.ok && Array.isArray(r.marks)) {
+            const next = Object.create(null)
+            for (const m of r.marks) if (m && m.sessionId) next[String(m.sessionId)] = m
+            markState.marks = next
+          }
+          markState.at = Date.now()
+          for (const fn of markWaiters) { try { fn() } catch (e) { /* 一个订阅者失败不阻塞其余 */ } }
+          markWaiters.clear()
+        })
+        .catch(() => {
+          markState.at = Date.now()
+          markWaiters.clear()
+        })
+        .then(() => { markRequest = null })
+      return markRequest
+    }
+
+    // 一行一个订阅：挂载时同步读共享状态，取数回来后由 markWaiters 通知重渲染。
+    // 没有全局定时器（动态沙箱不提供），所以刷新只发生在挂载与明确调用处。
+    function useTraceMark(sessionId) {
+      const [mark, setMark] = React.useState(null)
+      React.useEffect(() => {
+        let alive = true
+        const sync = () => { if (alive) setMark(markState.marks[String(sessionId)] || null) }
+        markWaiters.add(sync)
+        sync()
+        refreshMarks(false)
+        return () => { alive = false; markWaiters.delete(sync) }
+      }, [sessionId])
+      return mark
+    }
+
+    // 欠账的三个片段。悬停卡很窄（侧栏 280px 里的一张卡），所以这里不用一整句：
+    // 标题给"欠多久"，第二行给"从哪天起 + 等什么"，各一行；超出由 CSS 换行，不截字。
+    // `since` 是 skill 写进 trace 的 `feedback_pending_since`——按 updatedAt 猜会把"最近动过这一单"
+    // 读成"刚欠下"，所以缺它时如实写"起算日未记录"，不拿别的日期顶。
+    function markBits(mark) {
+      if (!mark) return null
+      const t = mark.since ? new Date(mark.since).getTime() : NaN
+      const valid = !isNaN(t)
+      let debt = '欠账天数未记录'
+      let since = '起算日未记录'
+      if (valid) {
+        const d = new Date(t)
+        const p = n => String(n).padStart(2, '0')
+        debt = '欠 ' + Math.max(0, Math.floor((Date.now() - t) / 86400000)) + ' 天'
+        since = '自 ' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+      }
+      const hit = mark.kind === 'case' && mark.caseId ? '命中 ' + mark.caseId : '未命中 case'
+      return { debt: debt, since: since, hit: hit }
+    }
+
+    // L1：悬停卡里的两行（悬停 800ms 后出现；侧栏自己的卡已有标题与时间，这里只加欠账）
+    function TraceRowHover(props) {
+      const mark = useTraceMark(props && props.sessionId)
+      if (!mark) return null
+      const bits = markBits(mark)
+      return React.createElement('div', { className: 'sleu-hover-mark' },
+        React.createElement('div', { className: 'sleu-hover-title' }, '待回报 · ' + bits.debt),
+        React.createElement('div', { className: 'sleu-hover-detail' }, bits.since + ' · ' + bits.hit),
+      )
+    }
+
+    // L2：行首空心点。DSH 只在"空闲且已读"的行渲染这个位置（运行中/未读先让给它的状态点），
+    // 所以这是尽力而为的标记，不是每行都有的徽标。
+    function TraceRowLeading(props) {
+      const mark = useTraceMark(props && props.sessionId)
+      if (!mark) return null
+      const bits = markBits(mark)
+      const label = '待回报 · ' + bits.debt + ' · ' + bits.since + ' · ' + bits.hit
+      return React.createElement('span', {
+        className: 'sleu-row-dot',
+        role: 'img',
+        'aria-label': label,
+        title: label,
+      })
+    }
+
+    // 会话 tab 只留「诊断」：它读的是这一单的轨迹。
     slots.inject('conversation.view', () => slots.register(
       { name: 'conversation.view', id: 'ascend-diagnose', order: 20, label: '诊断' },
       (props) => React.createElement(TraceView, props),
     ))
-    slots.inject('conversation.view', () => slots.register(
-      { name: 'conversation.view', id: 'ascend-metrics', order: 21, label: '指标' },
-      (props) => React.createElement(MetricsView, props),
+    // 指标读的是全库（metrics/ 与判据），与当前会话无关，所以常驻包把它交给整页「Ascend Sleuth」
+    // （dsh-plugins/sleuth-console）：没有会话也能打开，会话里不再多一个只显示全库数据的 tab。
+    // 动态热加载路径没有整页容器（SLEUTH_VIEWS 不存在），退回原来的 conversation.view tab。
+    if (typeof SLEUTH_VIEWS !== 'undefined' && SLEUTH_VIEWS !== null) {
+      SLEUTH_VIEWS.metrics = (props) => React.createElement(MetricsView, props)
+    } else {
+      slots.inject('conversation.view', () => slots.register(
+        { name: 'conversation.view', id: 'ascend-metrics', order: 21, label: '指标' },
+        (props) => React.createElement(MetricsView, props),
+      ))
+    }
+
+    // 侧栏两个座位：行首小点（只在空闲已读的行出现）与悬停卡一行。都只读。
+    slots.inject('sidebar.session.row.leading', () => slots.register(
+      { name: 'sidebar.session.row.leading', id: 'ascend-pending' },
+      (props) => React.createElement(TraceRowLeading, props),
+    ))
+    slots.inject('sidebar.session.row.hover', () => slots.register(
+      { name: 'sidebar.session.row.hover', id: 'ascend-pending' },
+      (props) => React.createElement(TraceRowHover, props),
     ))
   },
 }
@@ -3812,7 +3942,7 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
       id: 'ev-panel',
       build(host, styles) {
         return (function () {
-// ---- dsh-plugins/ev-panel/panel-client.js (sha256:9e836d4c1993) 原文开始 ----
+// ---- dsh-plugins/ev-panel/panel-client.js (sha256:f684735469ce) 原文开始 ----
 // ev-panel client —— 自演进看板（conversation.view 第三个 tab「自演进」）
 // 数据经 host.call('ev-board-load') 从 scripts/ev_board_data.py 汇总；
 // 单卡全文经 host.call('ev-idea-detail') 点开时才拉（列表页只带摘要）。
@@ -5016,10 +5146,147 @@ body[data-ds-dark-theme] .ev-btn.on{background:var(--br);border-color:var(--br);
 
     ctx.effect(() => () => { if (cssDisposer) cssDisposer() })
 
-    slots.inject('conversation.view', () => slots.register(
-      { name: 'conversation.view', id: 'ascend-evolve', order: 22, label: '自演进' },
-      (props) => React.createElement(BoardView, props),
-    ))
+    // 自演进看板读的是全库的卡与体检判决，与当前会话无关：常驻包把它交给整页「Ascend Sleuth」
+    // （dsh-plugins/sleuth-console）；动态热加载路径没有整页容器，退回 conversation.view tab。
+    if (typeof SLEUTH_VIEWS !== 'undefined' && SLEUTH_VIEWS !== null) {
+      SLEUTH_VIEWS.evolve = (props) => React.createElement(BoardView, props)
+    } else {
+      slots.inject('conversation.view', () => slots.register(
+        { name: 'conversation.view', id: 'ascend-evolve', order: 22, label: '自演进' },
+        (props) => React.createElement(BoardView, props),
+      ))
+    }
+  },
+}
+// ---- 原文结束 ----
+        })()
+      },
+    },
+    {
+      id: 'sleuth-console',
+      build(host, styles) {
+        return (function () {
+// ---- dsh-plugins/sleuth-console/console-client.js (sha256:119062e6c579) 原文开始 ----
+// sleuth-console/console-client.js —— 常驻包里的整页「Ascend Sleuth」（client-only）
+//
+// 为什么单有这一页：指标与自演进读的是**全库**（`metrics/`、`proposals/`、`knowledge/`），
+// 与当前会话无关。挂在 `conversation.view` 上等于"必须先开一单诊断才能看库"，而且每个会话
+// 各记一份"停在哪个全局页"。整页挂在 `main` + `sidebar.panellist`：左侧多一个图标，没有会话
+// 也能打开；会话里只留「诊断」一个 tab。
+//
+// 两个子页的组件不在这里。两个面板 apply 时把视图登记进 `SLEUTH_VIEWS`（常驻包的生成器在
+// 包里建这个对象）；动态热加载路径没有它，面板会退回 `conversation.view`，这一页也就不挂载。
+//
+// 只读边界不变：只渲染 RPC 读到的数据 + 给可复制指令，不做决策、不写仓库。
+
+return {
+  apply(ctx) {
+    // 动态热加载路径没有整页容器：安静退出，面板自己注册 tab。
+    if (typeof SLEUTH_VIEWS === 'undefined' || SLEUTH_VIEWS === null) return
+    const slots = ctx.get('slots')
+    if (slots === undefined) return
+
+    const PANEL_ID = 'ascend-sleuth-console'
+    const PANEL_LABEL = 'Ascend Sleuth'
+
+    const VIEWS = [
+      { id: 'metrics', label: '指标' },
+      { id: 'evolve', label: '自演进' },
+    ]
+
+    const styleHost = typeof styles !== 'undefined' && styles !== null ? styles : ctx.get('styles')
+    const CSS = `
+      .sleu-console{height:100%;box-sizing:border-box;overflow:auto;padding:18px 0 40px;
+        font-family:var(--font-sans);color:var(--dsw-alias-label-primary);
+        background:var(--dsw-alias-bg-layer-1)}
+      .sleu-console-inner{max-width:1180px;margin:0 auto;padding:0 20px}
+      .sleu-console-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+      .sleu-console-title{font-size:var(--t-2xl);font-weight:700;letter-spacing:.2px}
+      .sleu-console-sub{margin-top:3px;font-size:var(--t-sm);color:var(--dsw-alias-label-secondary)}
+      .sleu-console-tabs{display:flex;gap:18px;margin-top:14px;border-bottom:1px solid var(--hair)}
+      .sleu-console-tab{appearance:none;border:0;border-bottom:2px solid transparent;background:none;
+        padding:6px 2px 9px;font:inherit;font-size:var(--t-md);color:var(--dsw-alias-label-secondary);
+        cursor:pointer;transition:color .16s ease,border-color .16s ease}
+      .sleu-console-tab:hover{color:var(--dsw-alias-label-primary)}
+      .sleu-console-tab[data-on="1"]{color:var(--dsw-alias-label-primary);font-weight:600;border-bottom-color:var(--acc-blue)}
+      .sleu-console-tab:focus-visible{outline:none;border-radius:var(--r-xs);
+        box-shadow:0 0 0 3px color-mix(in srgb, var(--acc-blue) 22%, transparent)}
+      .sleu-console-body{padding-top:2px}
+      .sleu-console-empty{padding:20px 0;font-size:var(--t-md);color:var(--dsw-alias-label-secondary)}
+    `
+    let cssDisposer = null
+    if (styleHost !== undefined && styleHost !== null && typeof styleHost.insert === 'function') {
+      cssDisposer = styleHost.insert(CSS)
+    }
+
+    // 图标与 dsh-plugins/sleuth-console/icon.svg 同形（render_check 会逐条比对 path 数据）：
+    // 方框取芯片的形，里面一条体检读数线——读的是全库健康，不是某一单的轨迹。
+    function ConsoleIcon(props) {
+      const size = props && typeof props.size === 'number' ? props.size : 18
+      return React.createElement('svg', {
+        viewBox: '0 0 24 24', width: size, height: size, fill: 'none',
+        stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round',
+        'aria-hidden': 'true',
+      },
+        React.createElement('rect', { x: 3.6, y: 3.6, width: 16.8, height: 16.8, rx: 5 }),
+        React.createElement('path', { d: 'M6.4 12h2.1l1.5-3.1 2.3 6.2 1.5-3.1h3.8' }),
+      )
+    }
+
+    function ConsolePage(props) {
+      const requested = props && (props.view === 'metrics' || props.view === 'evolve') ? props.view : 'metrics'
+      const [active, setActive] = React.useState(requested)
+      const view = SLEUTH_VIEWS[active]
+      return React.createElement('div', { className: 'sleu-console' },
+        React.createElement('div', { className: 'sleu-console-inner' },
+          React.createElement('div', { className: 'sleu-console-head' },
+            React.createElement('div', null,
+              React.createElement('div', { className: 'sleu-console-title' }, PANEL_LABEL),
+              React.createElement('div', { className: 'sleu-console-sub' }, '全库读数 · 判据判决 · 自演进'),
+            ),
+          ),
+          React.createElement('div', { className: 'sleu-console-tabs', role: 'tablist' },
+            VIEWS.map(item => React.createElement('button', {
+              key: item.id,
+              type: 'button',
+              role: 'tab',
+              'aria-selected': active === item.id ? 'true' : 'false',
+              'data-on': active === item.id ? '1' : '0',
+              className: 'sleu-console-tab',
+              onClick: () => setActive(item.id),
+            }, item.label)),
+          ),
+          React.createElement('div', { className: 'sleu-console-body' },
+            view
+              ? React.createElement(view, { sessionId: props && props.sessionId })
+              : React.createElement('div', { className: 'sleu-console-empty' },
+                '这个子页没接上：面板源码没登记视图（重装常驻包或重启 DSH Desktop）。'),
+          ),
+        ),
+      )
+    }
+
+    const disposers = []
+    disposers.push(slots.inject('main', () => slots.register({
+      name: 'main',
+      key: PANEL_ID,
+    }, ConsolePage)))
+    disposers.push(slots.inject('sidebar.panellist', () => slots.register({
+      name: 'sidebar.panellist',
+      id: PANEL_ID,
+      order: 30,
+      label: PANEL_LABEL,
+    }, ConsoleIcon)))
+
+    if (cssDisposer !== undefined && cssDisposer !== null) disposers.push(cssDisposer)
+
+    return () => {
+      for (const dispose of disposers) {
+        try {
+          if (typeof dispose === 'function') dispose()
+        } catch (e) { /* 一个卸载失败不阻塞其余 */ }
+      }
+    }
   },
 }
 // ---- 原文结束 ----

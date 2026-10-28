@@ -21,6 +21,18 @@ return {
         const s = sessions.get(sessionId)
         if (s && s.header && s.header.cwd) return s.header.cwd
       }
+      // 整页面板没有会话上下文（sessionId 为空）：退到"第一个带 cwd 的会话"。
+      // 与 ascend-panel 的 pickCwdFromSessions 同一判据——面板读的是仓库，不是某一单；
+      // 不退这一步的后果是整页「指标 / 自演进」直接报「无法解析工作区」（实测）。
+      if (sessions && typeof sessions.list === 'function') {
+        try {
+          for (const s of sessions.list() || []) {
+            if (s && s.header && s.header.cwd) return s.header.cwd
+          }
+        } catch (e) {
+          return undefined
+        }
+      }
       return undefined
     }
 
@@ -31,6 +43,18 @@ return {
       if (!sandboxPolicySvc || typeof sandboxPolicySvc.resolve !== 'function') return undefined
       let session = null
       try { session = sessions && sessionId ? sessions.get(sessionId) : null } catch (e) { session = null }
+      // 无会话（整页面板）时用"第一个带 cwd 的会话"的档位。不传 session 会落到部署默认
+      //（workspace-write + launch-root），在受限令牌 runner 上子进程起不来，界面只剩
+      //「找不到 Python」——那是误导：解释器在、是沙箱把进程挡在启动之前。
+      if (session === null && sessions && typeof sessions.list === 'function') {
+        try {
+          for (const s of sessions.list() || []) {
+            if (s && s.header && s.header.cwd) { session = s; break }
+          }
+        } catch (e) {
+          session = null
+        }
+      }
       try {
         const policy = session ? sandboxPolicySvc.resolve({ session: session }) : sandboxPolicySvc.resolve()
         if (policy && typeof policy.mode === 'string') return policy

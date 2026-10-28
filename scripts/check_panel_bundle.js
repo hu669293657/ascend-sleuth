@@ -9,10 +9,11 @@
 //              未知端点回 not-found、已知端点走到面板的处理函数、非 POST 回 405、端点回退
 //            → 附带工具经 ctx.tools.register 注册（参数归一化成 DSL）→ 返回卸载函数且不抛
 //            工具定义优先用真品校验：探到已安装 DSH 时用它的 defineTool（写法不对当场红）。
-//   client 半：工厂产出插件 → exports.inject 含 slots → apply() 注册三个 conversation.view tab
-//            （id / order 与面板源码一致：ascend-diagnose 20、ascend-metrics 21、ascend-evolve 22）
-//            → 用 mock React（effect 同步跑、createElement 递归渲染函数组件）把三个 tab 的首屏
-//              各渲染一次，断言 host.call 真的发出各自的端点、渲染期无异常。
+//   client 半：工厂产出插件 → exports.inject 含 slots → apply() 注册一个对话 tab（诊断）+
+//            一个整页（main，key ascend-sleuth-console）+ 一个侧栏图标（sidebar.panellist，
+//            同一个 id）→ 用 mock React（effect 同步跑、createElement 递归渲染函数组件）把
+//            「诊断 tab」「Ascend Sleuth的指标子页」「Ascend Sleuth的自演进子页」各渲染一次，断言 host.call
+//            真的发出各自的端点、渲染期无异常。
 //            真机那一次仍归 scripts/panel_rpc_probe.js（同一条线协议）。
 //
 // 为什么值得有：面板包装进 profile 后，首个失败信号是「重启后 tab 不出现」，而那要用户重启
@@ -43,7 +44,8 @@ const repo = path.resolve(__dirname, '..')
 const BUNDLE = 'dsh-plugins/dsh-sleuth-panels'
 const CHANNEL = '/ascend-sleuth-panels'
 
-// 面板清单与生成器一致：id 只用于日志，host/client 是唯一真源
+// 面板清单与生成器一致：id 只用于日志，host/client 是唯一真源。
+// sleuth-console 是 client-only（整页「Ascend Sleuth」），所以这里没有 host。
 const PANELS = [
   {
     id: 'ascend-panel',
@@ -54,6 +56,10 @@ const PANELS = [
     id: 'ev-panel',
     host: 'dsh-plugins/ev-panel/panel-host.js',
     client: 'dsh-plugins/ev-panel/panel-client.js',
+  },
+  {
+    id: 'sleuth-console',
+    client: 'dsh-plugins/sleuth-console/console-client.js',
   },
 ]
 
@@ -419,6 +425,23 @@ async function checkListCache(mod) {
       check(v3.parsed === 1 && v3.cached === 1, '缓存：改一条只解析一条 parsed=1 / cached=1',
         JSON.stringify({ parsed: v3.parsed, cached: v3.cached }))
       check(s2 !== undefined && s2.status === 'in_progress', '缓存：内容更新被读到（不是旧值）', s2 && s2.status)
+
+      // 侧栏「待回报」标记：按 harness 会话号匹配，不按诊断名（两套 id 不能混用）。
+      // 没写 harness_session 的轨迹定位不到侧栏的行，必须跳过而不是猜。
+      fake.put('traces/s3.yaml', [
+        'session_id: s3', 'harness_session: session-abc',
+        'status: resolved', 'feedback:', '  outcome: pending', '  case: pending-investigation',
+        'feedback_pending_since: "2026-10-20"',
+        'created_at: 2026-10-20T00:00:00Z', 'updated_at: "2026-10-20T01:00:00Z"', '',
+      ].join('\n'))
+      const marksOut = await callRoute(record2.route, 'ascend-session-marks', {})
+      const marks = marksOut.parsed && marksOut.parsed.result && marksOut.parsed.result.value
+      const list = (marks && marks.marks) || []
+      check(marks !== undefined && marks.ok === true, '待回报标记：RPC 返回 ok', JSON.stringify(marks))
+      check(list.length === 1 && list[0].sessionId === 'session-abc',
+        '待回报标记：按 harness 会话号匹配（无 harness_session 的轨迹不出现）', JSON.stringify(list))
+      check(list.length === 1 && list[0].kind === 'no-case' && list[0].since === '2026-10-20',
+        '待回报标记：带类型与起算日', JSON.stringify(list[0]))
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true })
     }
@@ -548,39 +571,53 @@ async function checkClient() {
 
   const dispose = mod.apply(clientCtx)
 
+  // 2026-10 起的界面形式：会话里只留「诊断」一个 tab；指标与自演进搬到整页「Ascend Sleuth」。
+  // 侧栏另有会话行的两个座位（待回报标记）：行首小点与悬停卡一行。
+  // 整页与侧栏图标的 id 必须对齐——侧栏图标点下去，布局按 id 去 main 的 keyed slot 里找组件。
   const expected = [
-    ['ascend-diagnose', 20],
-    ['ascend-metrics', 21],
-    ['ascend-evolve', 22],
+    { name: 'conversation.view', id: 'ascend-diagnose', order: 20 },
+    { name: 'sidebar.session.row.leading', id: 'ascend-pending' },
+    { name: 'sidebar.session.row.hover', id: 'ascend-pending' },
+    { name: 'main', key: 'ascend-sleuth-console' },
+    { name: 'sidebar.panellist', id: 'ascend-sleuth-console', order: 30 },
   ]
-  const seen = registrations.map(r => [r.id, r.order])
+  const seen = registrations.map(r => ({
+    name: r.name,
+    id: r.id,
+    key: r.key,
+    order: r.order,
+  }))
   check(JSON.stringify(seen) === JSON.stringify(expected),
-    '注册三个 conversation.view tab（id + order）', JSON.stringify(seen))
-  check(registrations.every(r => r.name === 'conversation.view'),
-    '三个 tab 都注册在 conversation.view')
-  check(styleTags.length >= 2, '两个面板都经 styles.insert 注入样式', '标签数 ' + styleTags.length)
+    '注册面：诊断 tab + 整页 main + 侧栏图标（名称 / id / order）', JSON.stringify(seen))
+  check(registrations.filter(r => r.name === 'conversation.view').length === 1,
+    '会话里只有一个 tab（指标与自演进不再挂会话）',
+    JSON.stringify(registrations.filter(r => r.name === 'conversation.view').map(r => r.id)))
+  check(!registrations.some(r => r.id === 'ascend-metrics' || r.id === 'ascend-evolve'),
+    '指标 / 自演进的 conversation.view 注册已消失')
+  check(styleTags.length >= 3, '三个源文件都经 styles.insert 注入样式', '标签数 ' + styleTags.length)
 
-  // 渲染三个 tab 的首屏组件（mock React 同步跑 effect）：这条覆盖此前为零的 client 侧 host.call →
+  // 渲染各面的首屏组件（mock React 同步跑 effect）：这条覆盖 client 侧 host.call →
   // connection.rpc.call 映射——面板源码不渲染组件就不发 RPC，所以只有真渲染才能验到它。
-  const wantEndpoint = {
-    'ascend-diagnose': 'ascend-traces-list',
-    'ascend-metrics': 'ascend-metrics-verdict',
-    'ascend-evolve': 'ev-board-load',
-  }
-  for (const item of registrations) {
-    const label = item.id
+  // 整页渲染两次：指标与自演进是同一个组件按 props.view 选的子页，两次各验一条端点。
+  const wantEndpoint = [
+    { label: 'diagnose tab', find: r => r.name === 'conversation.view', props: { sessionId: 'selftest' }, endpoint: 'ascend-traces-list' },
+    { label: '会话行 · 待回报', find: r => r.name === 'sidebar.session.row.hover', props: { sessionId: 'selftest' }, endpoint: 'ascend-session-marks' },
+    { label: 'Ascend Sleuth · 指标', find: r => r.name === 'main', props: { sessionId: 'selftest', view: 'metrics' }, endpoint: 'ascend-metrics-verdict' },
+    { label: 'Ascend Sleuth · 自演进', find: r => r.name === 'main', props: { sessionId: 'selftest', view: 'evolve' }, endpoint: 'ev-board-load' },
+  ]
+  for (const item of wantEndpoint) {
+    const reg = registrations.find(item.find)
     let threw = null
     try {
-      if (typeof item.component === 'function') item.component({ sessionId: 'selftest' })
+      if (reg !== undefined && typeof reg.component === 'function') reg.component(item.props)
+      else threw = '没找到注册项'
     } catch (e) {
       threw = String((e && e.message) || e)
     }
-    check(threw === null, 'client 半 ' + label + ' 首屏组件渲染不抛', threw === null ? '' : threw)
-  }
-  for (const [id, endpoint] of Object.entries(wantEndpoint)) {
-    const hit = rpcCalls.find(c => c.endpoint === endpoint)
+    check(threw === null, 'client 半 ' + item.label + ' 首屏组件渲染不抛', threw === null ? '' : threw)
+    const hit = rpcCalls.find(c => c.endpoint === item.endpoint)
     check(hit !== undefined && hit.channel === CHANNEL,
-      'client 半 ' + id + ' 首屏经 host.call 发出 ' + endpoint,
+      'client 半 ' + item.label + ' 首屏经 host.call 发出 ' + item.endpoint,
       hit === undefined ? '未发出；已发出：' + JSON.stringify(rpcCalls.map(c => c.endpoint)) : JSON.stringify(hit.payload))
   }
   check(renderErrors.length === 0, '渲染期无异常（含被 createElement 递归调用的内层组件）',
@@ -605,6 +642,7 @@ function checkFidelity(artifactRel, half) {
 
   for (const panel of PANELS) {
     const rel = panel[half]
+    if (rel === undefined) continue   // sleuth-console 没有 host 半
     const raw = fs.readFileSync(path.join(repo, rel), 'utf8')
     // 生成器做两件事：① 把版本占位符换成 package.json 的 version ② 去掉源文件末尾空白。
     // 比对必须照同一条变换走，否则"原文逐字嵌进产物"会因为占位符被判红（这不是不一致，

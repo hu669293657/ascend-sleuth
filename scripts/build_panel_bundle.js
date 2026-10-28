@@ -39,7 +39,9 @@ const BUNDLE_DIR = 'dsh-plugins/dsh-sleuth-panels'
 const BUNDLE_NAME = 'dsh-sleuth-panels'
 const CHANNEL = '/ascend-sleuth-panels'
 
-// 面板清单：id 只用于日志前缀；host/client 是动态方言的源文件（唯一真源）
+// 面板清单：id 只用于日志前缀；host/client 是动态方言的源文件（唯一真源）。
+// sleuth-console 是 client-only：它不注册工具与 RPC，只把两个面板的视图装进一个整页
+// （main + sidebar.panellist）。三个源文件共用包里的 SLEUTH_VIEWS 登记表。
 const PANELS = [
   {
     id: 'ascend-panel',
@@ -50,6 +52,10 @@ const PANELS = [
     id: 'ev-panel',
     host: 'dsh-plugins/ev-panel/panel-host.js',
     client: 'dsh-plugins/ev-panel/panel-client.js',
+  },
+  {
+    id: 'sleuth-console',
+    client: 'dsh-plugins/sleuth-console/console-client.js',
   },
 ]
 
@@ -80,7 +86,8 @@ const PROVENANCE_END = '// ---- 原文结束 ----'
 
 // ── host 半产物：常驻 Cordis 插件（ESM） ──────────────────────────────────────
 function renderHost() {
-  const sources = PANELS.map(p => ({ id: p.id, rel: p.host, text: readSource(p.host) }))
+  // 只有带 host 半的面板进宿主产物；sleuth-console 是纯客户端
+  const sources = PANELS.filter(p => p.host !== undefined).map(p => ({ id: p.id, rel: p.host, text: readSource(p.host) }))
 
   const header = [
     '/* eslint-disable */',
@@ -307,7 +314,7 @@ function renderHost() {
 
 // ── client 半产物：页面的模块表产物（window.__ModuleLoader__.load） ────────────
 function renderClient() {
-  const sources = PANELS.map(p => ({ id: p.id, rel: p.client, text: readSource(p.client) }))
+  const sources = PANELS.filter(p => p.client !== undefined).map(p => ({ id: p.id, rel: p.client, text: readSource(p.client) }))
 
   const header = [
     '/* eslint-disable */',
@@ -318,6 +325,9 @@ function renderClient() {
     '// 面板源码是动态插件方言（靠沙箱提供的 host 通信）；这里原文嵌入页面产物，并补一层适配：',
     "// host.call(name, args) → ctx.get('connection').rpc.call(CHANNEL, name, args)。",
     '// React 由页面的模块表提供（与宿主同一份，不重复安装）。',
+    '//',
+    '// SLEUTH_VIEWS 是三个源文件之间的登记表：两个面板把视图写进去，sleuth-console 的整页',
+    '// 按 id 取来渲染。动态热加载路径没有这个对象，面板因此退回 conversation.view 的 tab。',
     '',
   ].join('\n')
 
@@ -385,6 +395,9 @@ function renderClient() {
     '        dispose() { for (const tag of tags) tag.remove(); tags.clear() },',
     '      }',
     '    }',
+    '',
+    '    // 面板视图登记表（见文件头）：面板 apply 时写入，sleuth-console 的整页读取。',
+    '    const SLEUTH_VIEWS = {}',
     '',
     '    const PANELS = [',
     panels,

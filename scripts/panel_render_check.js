@@ -109,7 +109,7 @@ const React = {
   },
 }
 
-async function renderAsync(clientSrc, slotProps, hostImpl, { settle = 8 } = {}) {
+async function renderAsync(clientSrc, slotProps, hostImpl, { settle = 8, views, requireSlots = true } = {}) {
   hookIdx = 0; hookState = []; depState = []; effectQueue = []; cssChunks = []
   const registrations = []
   const ctx = {
@@ -126,9 +126,12 @@ async function renderAsync(clientSrc, slotProps, hostImpl, { settle = 8 } = {}) 
   }
   const host = { call: (m, a) => Promise.resolve(hostImpl(m, a)) }
   const stylesGlobal = { insert(css) { cssChunks.push(css); return () => {} } }
-  const plugin = new Function('React', 'host', 'styles', 'return (function(){' + clientSrc + '})()')(React, host, stylesGlobal)
+  // 第 5 个形参是整页「Ascend Sleuth」的视图登记表：传 undefined 时面板走动态热加载那条路
+  // （自己注册 conversation.view），传对象时把视图登记进去、由 sleuth-console 的整页取用。
+  const plugin = new Function('React', 'host', 'styles', 'SLEUTH_VIEWS',
+    'return (function(){' + clientSrc + '})()')(React, host, stylesGlobal, views)
   plugin.apply(ctx)
-  if (!registrations.length) throw new Error('未注册任何 slot')
+  if (requireSlots && !registrations.length) throw new Error('未注册任何 slot')
   let out = []
   for (let round = 0; round < settle; round++) {
     effectQueue = []
@@ -746,9 +749,67 @@ async function main() {
   }
   const asc = await renderAsync(ascSrc, { sessionId: 'sess-1' }, ascHost)
   expect('渲染无异常', true)
-  expect('注册两个 tab', asc.regs.length === 2)
-  expect('诊断 tab id', asc.regs[0].opts.id === 'ascend-diagnose')
-  expect('指标 tab id', asc.regs[1].opts.id === 'ascend-metrics')
+  const ascTabs = asc.regs.filter(r => r.opts.name === 'conversation.view')
+  expect('注册两个 tab', ascTabs.length === 2)
+  expect('诊断 tab id', ascTabs[0].opts.id === 'ascend-diagnose')
+  expect('指标 tab id', ascTabs[1].opts.id === 'ascend-metrics')
+
+  // ================= 会话行「待回报」标记（L1 悬停卡一行 + L2 行首空心点）=================
+  // 为什么单开一节：这两处是侧栏的全局座位，取数是共享的一条瘦 RPC（N 行只读一次）。
+  // 断言钉三件事：有欠账才有节点、欠多久按 feedback_pending_since 写、命中与未命中 case 分开说。
+  // 侧栏自己的状态点（运行中/未读）优先级更高，那是 DSH 的行为，不在这里测。
+  console.log('\n[ascend-panel 会话行标记 · 待回报]')
+  {
+    const marksHost = (method) => {
+      if (method === 'ascend-session-marks') {
+        return {
+          ok: true,
+          marks: [
+            { sessionId: 'sess-1', kind: 'case', caseId: 'hccl-timeout-007', since: '2026-09-12' },
+            { sessionId: 'sess-2', kind: 'no-case', caseId: null, since: '' },
+          ],
+        }
+      }
+      return { ok: true, sessions: [] }
+    }
+    const rendered = await renderAsync(ascSrc, { sessionId: 'sess-1' }, marksHost)
+    const seatsOf = (name) => rendered.regs.filter(r => r.opts.name === name)
+    const leadSeat = seatsOf('sidebar.session.row.leading')
+    const hoverSeat = seatsOf('sidebar.session.row.hover')
+    expect('注册了行首与悬停两个座位', leadSeat.length === 1 && hoverSeat.length === 1,
+      JSON.stringify(rendered.regs.map(r => r.opts.name)))
+    expect('两个座位用同一个 id', leadSeat[0].opts.id === hoverSeat[0].opts.id)
+
+    // 单独重渲一个座位：mock 的 useState 槽位是全局递增的，混在一次渲染里会读到别的组件的槽位
+    const renderSeat = async (reg, props) => {
+      hookIdx = 0; hookState = []; depState = []; effectQueue = []
+      let tree = null
+      for (let i = 0; i < 8; i++) {
+        effectQueue = []; hookIdx = 0
+        tree = reg.comp(props)
+        const eff = effectQueue.slice()
+        if (!eff.length) break
+        eff.forEach(f => f())
+        await new Promise(r => setImmediate(r))
+      }
+      return tree
+    }
+    const textOf = (tree) => { const o = []; flatten(tree, o); return o.join(' ') }
+
+    const leadOne = textOf(await renderSeat(leadSeat[0], { sessionId: 'sess-1' }))
+    expect('行首：命中 case 的行带天数、起算日与 case', /待回报 · 欠 \d+ 天 · 自 \d{2}-\d{2} · 命中 hccl-timeout-007/.test(leadOne), leadOne)
+    const leadNone = textOf(await renderSeat(leadSeat[0], { sessionId: 'sess-2' }))
+    expect('行首：缺起算日时如实写「起算日未记录」', /起算日未记录/.test(leadNone), leadNone)
+    expect('行首：未命中 case 与命中 case 分开说', /未命中 case/.test(leadNone) && !/命中 hccl-timeout-007/.test(leadNone), leadNone)
+    const leadUnknown = await renderSeat(leadSeat[0], { sessionId: 'no-such-session' })
+    expect('行首：没有欠账的会话不渲染节点', leadUnknown === null || leadUnknown === undefined, String(leadUnknown))
+
+    const hoverOne = textOf(await renderSeat(hoverSeat[0], { sessionId: 'sess-1' }))
+    expect('悬停卡：两行说清「待回报 · 欠 N 天」+ 起算日 + 命中 case',
+      /待回报 · 欠 \d+ 天/.test(hoverOne) && /自 \d{2}-\d{2}/.test(hoverOne) && /hccl-timeout-007/.test(hoverOne), hoverOne)
+    const hoverUnknown = await renderSeat(hoverSeat[0], { sessionId: 'no-such-session' })
+    expect('悬停卡：没有欠账的会话不渲染这一行', hoverUnknown === null || hoverUnknown === undefined, String(hoverUnknown))
+  }
 
   hookIdx = 0; hookState = []; depState = []; effectQueue = []; cssChunks = []
   let mt = ''
@@ -3186,16 +3247,16 @@ print(json.dumps([{'role': s(t.get('role')), 'step': s(t.get('step')), 'action':
       expect('ev-panel：代码里无「fs 缺失就整插件 return」', !/if \(fs === undefined\) return/.test(codeOf(evSrc)))
     }
 
-    // ② ascend-panel：fs 缺失时仍注册全部 RPC；依赖 fs 的七个给明确错误，不依赖的四个不受影响
+    // ② ascend-panel：fs 缺失时仍注册全部 RPC；依赖 fs 的八个给明确错误，不依赖的四个不受影响
     {
       const ascHostSrc = loadHost('dsh-plugins/ascend-panel/panel-host.js')
       const d = driveHost(ascHostSrc, NO_SVC)
       const needFsRpcs = ['ascend-traces-list', 'ascend-traces-detail', 'ascend-update-sedimented',
-        'ascend-metrics-load', 'ascend-read-report', 'ascend-kb-health', 'ascend-process-health']
+        'ascend-metrics-load', 'ascend-read-report', 'ascend-kb-health', 'ascend-process-health', 'ascend-session-marks']
       const noFsRpcs = ['ascend-open-evidence', 'ascend-metrics-verdict', 'ascend-export-trace',
         'ascend-rebuild-local']
-      expect('ascend-panel：fs 缺失时仍注册全部 11 个 RPC（「实时计算」那条已随块一起删）',
-        Object.keys(d.regs).length === 11, Object.keys(d.regs).join(','))
+      expect('ascend-panel：fs 缺失时仍注册全部 12 个 RPC（含侧栏待回报标记那条）',
+        Object.keys(d.regs).length === 12, Object.keys(d.regs).join(','))
       expect('ascend-panel：返回可用的 disposer', typeof d.disposer === 'function')
       expect('ascend-panel：导出交接包的 RPC 已注册（fs 缺失不影响它）', !!d.regs['ascend-export-trace'])
       for (const rpc of needFsRpcs) {
@@ -3210,7 +3271,7 @@ print(json.dumps([{'role': s(t.get('role')), 'step': s(t.get('step')), 'action':
           !(r && r.ok === false && /需要 fs 服务/.test(r.error)), String(r && r.error).slice(0, 110))
       }
       const guarded = (ascHostSrc.match(/if \(!fs\) return needFs\(\)/g) || []).length
-      expect('ascend-panel：恰好 7 个 handler 带 fs 守卫（放错位置即被这条抓住）', guarded === 7, 'guarded=' + guarded)
+      expect('ascend-panel：恰好 8 个 handler 带 fs 守卫（放错位置即被这条抓住）', guarded === 8, 'guarded=' + guarded)
       expect('ascend-panel：代码里无「fs 缺失就整插件 return」',
         !/if \(fs === undefined\) return/.test(codeOf(ascHostSrc)))
     }
@@ -3511,6 +3572,65 @@ print(json.dumps([{'role': s(t.get('role')), 'step': s(t.get('step')), 'action':
           t.includes(secs + ' 秒内复用'), 'host=' + secs + ' 秒')
       }
     }
+  }
+
+  // ================= 整页「Ascend Sleuth」（sleuth-console） =================
+  // 形式变更：指标与自演进不再各占一个会话 tab，而是同一页的两个子页。这一节验四件事：
+  // 两个面板真的把视图登记进了整页能取到的位置；默认与切换各渲染出对应内容；视图缺失时
+  // 如实说没接上（不空白、不拿别的东西冒充）；图标与 icon.svg 同源（两处各改一半会变成两个图标）。
+  console.log('\n[sleuth-console Ascend Sleuth · 整页]')
+  {
+    const consoleSrc = fs.readFileSync(path.join(repo, 'dsh-plugins/sleuth-console/console-client.js'), 'utf8')
+    const views = {}
+    const pageHost = (method) => {
+      if (method === 'ev-board-load') return { ok: true, data: board }
+      if (method === 'ev-health-load') return { ok: true, data: health }
+      if (method === 'ascend-metrics-load') return { ok: true, periods: periods }
+      if (method === 'ascend-traces-list') return { ok: true, sessions: [] }
+      if (method === 'ascend-kb-health') {
+        return { ok: true, cases: { total: 1, lowConfidence: 0, byCategory: {}, byNamespace: {} }, references: { total: 0, draftCount: 0, staleCount: 0, byType: {} } }
+      }
+      if (method === 'ascend-process-health') {
+        return { ok: true, total: 1, submitted: 0, promoted: 0, inProgress: 0, resumed: 0, refSessions: 0 }
+      }
+      return { ok: false, error: 'n/a ' + method }
+    }
+    // 复现常驻包的装载顺序：两个面板先 apply 把视图写进登记表（这一步不渲染，也不要求注册 slot）。
+    await renderAsync(evSrc, { sessionId: 'sess-1' }, pageHost, { views, requireSlots: false })
+    await renderAsync(ascSrc, { sessionId: 'sess-1' }, pageHost, { views, requireSlots: false })
+    expect('两个面板都把视图登记进了整页',
+      typeof views.metrics === 'function' && typeof views.evolve === 'function')
+
+    const page = await renderAsync(consoleSrc, { sessionId: 'sess-1' }, pageHost, { views })
+    expect('注册整页与侧栏图标各一个',
+      page.regs.length === 2 && page.regs[0].opts.name === 'main' && page.regs[1].opts.name === 'sidebar.panellist',
+      JSON.stringify(page.regs.map(r => r.opts.name)))
+    expect('整页与图标同 id（点图标按 id 寻址整页）',
+      page.regs[0].opts.key === page.regs[1].opts.id,
+      String(page.regs[0].opts.key) + ' / ' + String(page.regs[1].opts.id))
+    expect('侧栏图标带可读名字', page.regs[1].opts.label === 'Ascend Sleuth', String(page.regs[1].opts.label))
+
+    expect('默认落在「指标」子页（渲染出指标首屏）', page.text.includes('本期变化'), page.text.slice(0, 160))
+    const evo = await renderAsync(consoleSrc, { sessionId: 'sess-1', view: 'evolve' }, pageHost, { views })
+    expect('切到「自演进」子页渲染看板', evo.text.includes('自演进 · 体检'), evo.text.slice(0, 160))
+    expect('两个子页的入口都在', page.text.includes('指标') && page.text.includes('自演进'))
+
+    const empty = await renderAsync(consoleSrc, { sessionId: 'sess-1' }, pageHost, { views: {} })
+    expect('视图缺失时给一行说明（不空白）', empty.text.includes('没接上'), empty.text.slice(0, 160))
+
+    const svg = fs.readFileSync(path.join(repo, 'dsh-plugins/sleuth-console/icon.svg'), 'utf8')
+    const rect = (svg.match(/<rect[^>]*\/>/) || [''])[0]
+    const attr = (name) => {
+      const m = rect.match(new RegExp('\\b' + name + '="([^"]+)"'))
+      return m === null ? '' : m[1]
+    }
+    expect('图标方框与 icon.svg 一致（x/y/宽/高/圆角）',
+      consoleSrc.includes('x: ' + attr('x') + ', y: ' + attr('y')
+        + ', width: ' + attr('width') + ', height: ' + attr('height') + ', rx: ' + attr('rx')),
+      'svg 方框：' + rect)
+    const paths = [...svg.matchAll(/d="([^"]+)"/g)].map(m => m[1])
+    expect('图标 path 数据与 icon.svg 一致（' + paths.length + ' 条）',
+      paths.length > 0 && paths.every(d => consoleSrc.includes(d)), paths.join(' | '))
   }
 
   // ================= 本脚本自己起 Python 的编码（Windows 中文区域的复发点）=================
