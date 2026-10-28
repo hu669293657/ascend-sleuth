@@ -61,3 +61,7 @@ decisions:
     when: 2026-10-27
     type: decision
     conclusion: 采纳（validated）——交接从「人复制」变成「仓库里可提交的文件 + 一条导出命令」
+  - who: agent
+    when: 2026-10-28
+    type: action
+    conclusion: "合入指针回写：本卡（及其结论）随 PR #372 进入 main（回写由 evolve 批次收尾执行，供判据「待合入积压」读取）"
