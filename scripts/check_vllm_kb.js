@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // vllm-kb 接入插件的离线自测：打桩，不需要 DSH，也不需要内网实例。
 //
-// 覆盖：配置归一化与读写、repo#编号 → source_id、四个能力的请求形状（打一台进程内假服务）、
+// 覆盖：插件入口接线（index.js 可加载、无 @deepseek-ai/dsh-tools 时回退 defineTool 能注册工具）、
+// 配置归一化与读写、repo#编号 → source_id、四个能力的请求形状（打一台进程内假服务）、
 // 输出截断、错误映射（HTTP 4xx/5xx）、可用性三态与缓存、无端点时的降级、
 // 探测路由用请求带来的地址（页面改了还没保存也能测）、兜底命令行入口能跑。
 //
@@ -41,6 +42,27 @@ function eq(actual, expected, label) {
 function ok(value, label) {
   if (!value) throw new Error(label || '断言失败')
 }
+
+console.log('[0] 插件入口接线（index.js：顶层动态 import + dsh-tools 回退）')
+// index.js 曾静态 import '@deepseek-ai/dsh-tools'：包被 link 装进 profile 时从仓库真实路径解析，
+// 到不了 DSH 安装处的 node_modules，整个插件树加载失败（实测报错 Cannot find package）。
+// 下面两条钉住接线：① 模块能加载；② 无 dsh-tools 可解析时（CI 检出即此形态）回退实现
+// 能注册出可用的工具对象。回归成静态 import，本段直接红。
+check('index.js 可加载，注册元齐全', async () => {
+  const entry = await import(new URL('../dsh-plugins/dsh-sleuth-vllm-kb/index.js', import.meta.url).href)
+  eq(entry.name, 'kb-evidence')
+  ok(Array.isArray(entry.inject) && entry.inject.includes('tools'), 'inject 应含 tools')
+  ok(typeof entry.apply === 'function', 'apply 应是函数')
+  return true
+})
+check('无 dsh-tools 可解析时回退 defineTool 注册三个工具（tools 模式）', async () => {
+  const entry = await import(new URL('../dsh-plugins/dsh-sleuth-vllm-kb/index.js', import.meta.url).href)
+  const tools = []
+  await entry.apply({ tools: { register: (tool) => tools.push(tool) } }, { mode: 'tools' })
+  eq(tools.map((tool) => tool.name).join(','), 'vllm_kb_code,vllm_kb_fix,vllm_kb_doc')
+  ok(tools.every((tool) => typeof tool.execute === 'function' && tool.output && tool.output.schema), '每个工具都应带 execute 与 output.schema')
+  return true
+})
 
 console.log('[1] 配置归一化')
 check('缺字段走默认值', () => {

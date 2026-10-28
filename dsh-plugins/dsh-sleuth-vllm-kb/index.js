@@ -8,7 +8,6 @@
 // 纯逻辑在 ./lib/core.js；这里只做 DSH 侧接线。
 // 只要配一个端点就能用：请求直接打它的只读接口，不需要客户端文件。
 
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import {
   CONTENT_LIMIT,
   activeEndpoint,
@@ -20,6 +19,24 @@ import {
   readConfig,
   writeConfig,
 } from './lib/core.js'
+
+// defineTool 从 DSH 安装处解析（`@deepseek-ai/dsh-tools`），但**不能写成静态 import**：
+// 包被装进 profile 时，模块解析从本文件的真实路径（仓库）出发，走不到安装处的 node_modules。
+// 静态 import 失败会让整个 host 半 import 不进来——插件树加载失败，设置页那一栏与四个工具全没注册
+// （实测：`failed to import: Cannot find package @deepseek-ai/dsh-tools`）。
+// 所以先试着拿真品，拿不到就用下面的最小实现接管（与 dsh-sleuth-panels 的产物同一做法）。
+let defineTool
+try {
+  defineTool = (await import('@deepseek-ai/dsh-tools')).defineTool
+} catch {
+  defineTool = (options) => ({
+    name: options.name,
+    description: options.description,
+    parameters: options.parameters,
+    output: { schema: options.output.schema, render: options.output.render },
+    execute: options.execute,
+  })
+}
 
 export const name = 'kb-evidence'
 export const inject = ['tools']

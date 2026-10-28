@@ -14,7 +14,7 @@
 
 ## 装与配
 
-1. 装包：`node scripts/panel_install.js --all`（和面板包一起装/更新），或 `node scripts/panel_install.js --spec "$PWD/dsh-plugins/vllm-kb"` 只装它；也可以在侧栏「插件」里粘贴本目录绝对路径。换装要重启 DSH Desktop。
+1. 装包：`node scripts/panel_install.js --all`（和面板包一起装/更新），或 `node scripts/panel_install.js --spec "$PWD/dsh-plugins/dsh-sleuth-vllm-kb"` 只装它；也可以在侧栏「插件」里粘贴本目录绝对路径。换装要重启 DSH Desktop。
 2. **设置页左侧栏**多一项「vllm-kb」，点进去：添加端点（名称 + 地址）、单选启用、点「测试」看 `/health` 的往返耗时与 embedding 状态（探的就是输入框里那条地址，改完直接测，不必先保存）。**OCR 走哪个地址**：与检索同一个 KB 端点（`POST :8000/ocr`）。从 vllm-kb 实现看，`/ocr` 是同一个 API 应用上的路由，PaddleOCR 由服务端通过 `ocr_provider=api` + `ocr_api_base` 调用，agent 不直连它。
 3. 打开插件页里本包的 `vllm-kb-tools` 行；需要截图转文字再单独开 `vllm-kb-ocr`（模型能读图就不用开）。
 4. 会话里就有 `vllm_kb_*` 四个工具了。
@@ -58,7 +58,7 @@
 node scripts/check_vllm_kb.js
 ```
 
-打桩跑 33 项：配置归一化与读写、`repo#编号 → source_id`、四个能力的请求形状（进程内假服务核对 body 与 query）、输出截断、5xx 映射、可用性三态与缓存，探测路由用请求带来的地址与超时（页面上改了还没保存也能测）、探没保存的地址不写缓存，以及 `scripts/vllm_kb_config.mjs` 这个兜底命令行入口能跑通。CI 的 panel-checks 里跑这一条。
+打桩跑 35 项：插件入口接线（`index.js` 可加载、无 `@deepseek-ai/dsh-tools` 时回退 `defineTool` 能注册三个工具）、配置归一化与读写、`repo#编号 → source_id`、四个能力的请求形状（进程内假服务核对 body 与 query）、输出截断、5xx 映射、可用性三态与缓存，探测路由用请求带来的地址与超时（页面上改了还没保存也能测）、探没保存的地址不写缓存，以及 `scripts/vllm_kb_config.mjs` 这个兜底命令行入口能跑通。CI 的 panel-checks 里跑这一条。
 
 **它证明不了的**：设置页那一项能否渲染、工具注册、真服务返回的业务字段。这几条只能真机验证。
 

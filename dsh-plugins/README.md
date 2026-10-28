@@ -32,7 +32,7 @@
 
 ## 目录里还有第三个包：vllm-kb（不是面板）
 
-vllm-kb 接入插件，两行：`vllm-kb-tools`（三个 `vllm_kb_*` 工具，默认关）与 `vllm-kb-ocr`（截图转文字，默认关）与 `vllm-kb-settings`（设置页左侧栏「vllm-kb」的配置与探测，默认开）。它不是可视化面板，也不占 `conversation.view` 的 tab——配置注册在设置页左侧栏（`settings.section`）。装法、配置字段与联调清单见 `vllm-kb/README.md`。
+vllm-kb 接入插件，两行：`vllm-kb-tools`（三个 `vllm_kb_*` 工具，默认关）与 `vllm-kb-ocr`（截图转文字，默认关）与 `vllm-kb-settings`（设置页左侧栏「vllm-kb」的配置与探测，默认开）。它不是可视化面板，也不占 `conversation.view` 的 tab——配置注册在设置页左侧栏（`settings.section`）。装法、配置字段与联调清单见 `dsh-sleuth-vllm-kb/README.md`。
 
 ## 四条装载路（面板源码一份）
 
