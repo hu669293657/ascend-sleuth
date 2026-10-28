@@ -49,6 +49,7 @@ disable-model-invocation: true
 | S2 校准集未测条目 / replay miss | `scripts/s2_replay.py --todo` | L1 补 case 卡（S2 佐证缺口） |
 | 指标漂移（命中率/回滚/token 趋势） | `metrics/timeline.yaml` + trace_metrics | 诊断式候选轮 |
 | 长期任务轮间信号 | task/session state | 下一轮范围决策 |
+| 下游部署交上来的信号台账 | `proposals/signals/`（`scripts/evolve_signals.py list`） | L2 卡：按台账里的组件与证据产卡 |
 
 **深度轮不做的事**：不抓新数据、不沉淀内容（那属内容 skill + evolve-check）、不每轮全做——按对齐目标选信号源。
 
@@ -134,9 +135,9 @@ dual 双签 + kb/high-risk，步骤级小调 review。
 
 - 内容目标不进本 skill（路由到内容 skill + evolve-check）；
 - **不越过部署声明**：开工前跑 `python3 scripts/evolve_mode.py --json`。`record-only` 部署
-  （内网 fork 的常见形态）照做观测与报告，但**不产卡、不跑验证门**——候选写进报告与
-  MR 描述/issue 交上游，理由同 /skill:evolve-check 第 0 步（本地卡号会与上游号段重号）；
-  `off` 部署不执行深度轮，报告说明按部署声明跳过；
+  （只做内容沉淀的下游部署）照做观测与报告，但**不产卡、不跑验证门**——候选写进信号台账
+  `proposals/signals/`（`scripts/evolve_signals.py add`），理由同 /skill:evolve-check 第 0 步
+  （本地卡号会与上游号段重号）；`off` 部署不执行深度轮，报告说明按部署声明跳过；
 - 指标口径只有人能改（agent 不自改评分定义）；
 - 不碰客户现场；蓝图态（长期任务层跨轮自动/超时降级/stale/策略记忆/稳态降频）触发条件出现才启用。
 
@@ -145,6 +146,7 @@ dual 双签 + kb/high-risk，步骤级小调 review。
 | 能力 | 工具/入口 | 何时用 |
 |---|---|---|
 | 部署声明（能不能产卡） | `scripts/evolve_mode.py --json` | 深度轮开工前、产卡前 |
+| 信号台账（下游部署收的候选） | `scripts/evolve_signals.py list / export` | 读输入、产卡前 |
 | 伴随评估（内容流程收尾） | /skill:evolve-check | 内容 skill 收尾自动（用户下内容目标时隐含） |
 | 观测（深度轮信号） | `scripts/component_tally.py` / `s2_replay.py --todo` / `_index.yaml` 头注 | 深度轮 |
 | 查重/产卡 | `scripts/ev_proposal.py --list / --new` | 产卡时 |

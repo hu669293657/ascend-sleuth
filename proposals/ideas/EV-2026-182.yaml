@@ -1,0 +1,63 @@
+id: EV-2026-182
+layer: L2
+target_component: scripts/evolve_signals.py
+title: record-only 部署的收尾信号没有交接产物 → proposals/signals/ 台账 + 导出成 issue/MR 文本
+status: validated
+authorization: review
+dimension: evolvability
+supersedes: []
+superseded_by: null
+created_at: 2026-10-27
+source_signals:
+  - signal: human_feedback
+    evidence: 问「record-only 下 EV 的产物放哪、本地跑完怎么交接给上游」时，答案是「什么都不落，靠人复制」
+    trajectory:
+      - "proposals/ideas/EV-2026-181.yaml"
+      - "skills/evolve-check/SKILL.md#评估步骤"
+  - signal: self_review_gap
+    evidence: 收尾说明只在会话里、exec-log 是运行时件不进版本库——两条都不构成交接
+    trajectory:
+      - "docs/mechanism/run.md#统一执行记录"
+      - ".gitignore"
+hypothesis: 把 record-only 的信号写成仓库文件后，下游部署的每个收尾都有可提交的交接产物，上游能机械读取并产卡
+predicted_effect:
+  metric: record-only 部署可交接的收尾产物数
+  from: "0（收尾说明在会话里，exec-log 不进版本库）"
+  to: "每条信号一个 proposals/signals/*.yaml，可随 PR 提交"
+  measure:
+    command: "rm -rf /tmp/evsig-check && python3 scripts/evolve_signals.py --root /tmp/evsig-check add --signal T10 --signal-text 自审发现的缺口 --target skills/evolve-check/SKILL.md --evidence 证据一 --trajectory products/X && python3 scripts/evolve_signals.py --root /tmp/evsig-check export"
+    expect_exit: 0
+    expect_stdout: "## 1. [T10] 自审发现的缺口"
+validation:
+  method: scan_review
+  baseline: 现 record-only 分支（信号只进收尾说明与 exec-log）
+  success_criteria: 单测覆盖去重、改证据即新条目、导出形态、坏文件报错；导出的 Markdown 可直接贴进 issue/MR；人审确认台账字段够上游产卡
+  rollback: 合入前丢弃分支；合入后 git revert（新增脚本、目录与文档回退）
+gate:
+  condition: "有部署不产卡但仍要向上游交信号；且收尾说明与 exec-log 都不构成交接"
+risk: low
+principle_refs: [2, 8, 10, 11]
+actual_cost:
+  tokens: 0
+  note: 人工指派的机制改动，token 未单独记账
+decisions:
+  - who: agent
+    when: 2026-10-27
+    type: proposal
+    conclusion: 信号写成 proposals/signals/ 下的独立文件，文件名取内容哈希前 8 位（不编号，跨部署不撞号；同信号重复出现只累加次数）；再加 export 渲染成 issue/MR 描述
+  - who: agent
+    when: 2026-10-27
+    type: action
+    conclusion: 新增 scripts/evolve_signals.py（add/list/export）、proposals/signals/README.md、tests/test_evolve_signals.py；evolve-check 第 3 步加 record-only 分支；self-evolve 把台账列为观测输入；git-workflow 归属表与用户指南补说明
+  - who: agent
+    when: 2026-10-27
+    type: eval
+    conclusion: 9 个单测通过（去重、改证据即新条目、导出形态、since 过滤、坏文件退 2）；proposal 校验通过；measure 实跑 PASS
+  - who: agent
+    when: 2026-10-28
+    type: action
+    conclusion: 补一条边界进 SKILL 与台账 README——下游只记现象与出处，不做实验、不做验证、不写预测；已跑过的命令可写进 evidence，没跑过的不许编
+  - who: agent
+    when: 2026-10-27
+    type: decision
+    conclusion: 采纳（validated）——交接从「人复制」变成「仓库里可提交的文件 + 一条导出命令」

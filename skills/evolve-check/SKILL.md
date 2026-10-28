@@ -38,7 +38,7 @@ description: >
 协议（深度轮已含观测）。
 
 **触发受部署声明约束**：这个部署要不要产卡由仓库根 `deployment.yaml` 的
-`evolution.mode` 决定（第 0 步读），不由本协议自己决定。内网 fork 只做内容沉淀时设
+`evolution.mode` 决定（第 0 步读），不由本协议自己决定。只做内容沉淀的下游部署设
 `record-only`：信号照记，卡不产——本地卡号会与上游号段重号，合并时无法机械解决。
 
 ## 评估步骤（先扫信号，无信号即止）
@@ -52,7 +52,7 @@ python3 scripts/evolve_mode.py --json      # → {"mode": "full" | "record-only"
 | mode | 本协议怎么执行 |
 |---|---|
 | `full` | 照第 1～4 步执行 |
-| `record-only` | 第 1、2 步照做；**第 3 步整段跳过**（不产卡、不查重、不跑验证门）；命中行为面信号时写进收尾说明与 MR 描述/issue，不进本地产卡池；第 4 步照落记录 |
+| `record-only` | 第 1、2 步照做；第 3 步不产卡、不查重、不跑验证门，只把命中的信号写进台账 `proposals/signals/`（见第 3 步的 record-only 分支）；第 4 步照落记录 |
 | `off` | 不做第 1～3 步；收尾说明只写一行（"跳过，按部署声明"），并落一条 skip 记录（不落的话，"没跑"与"跑了无信号"在数据上无法区分） |
 
 - 脚本退出码 2 = 声明写坏（取值不在词表、YAML 解析失败、有文件但缺 `evolution.mode`）。
@@ -106,6 +106,20 @@ python3 scripts/evolve_mode.py --json      # → {"mode": "full" | "record-only"
 | T11 | **审计/数据体检**：口径漂移、断言过期、数据反常（如「同名概念两个数」「断言里写死的数字已腐烂」） | 存量在腐化 | 产 L2 卡：修口径或改断言；**审计轮本身不产卡**，带具体缺陷才产 |
 
 **第 3 步：产卡 + 自行验证（有信号时，agent 自动完成，不等用户）**：
+
+> **`record-only` 分支**：本步不产卡（卡号按检出递增，两个仓各产各的会重号），改为写信号台账——同一节报出的每条信号一条命令，重复出现会自己累加次数，不必先去重：
+>
+> ```
+> python3 scripts/evolve_signals.py add --signal T10 --signal-text "自审发现的缺口" \
+>   --target <要改的组件：skill 路径 / 脚本名> --evidence "<一句话证据，不含客户原文>" \
+>   --trajectory "<产出 id / trace / replay 结果>" --suggested "<建议动作，没有方案可留空>" \
+>   --source <上游 skill>
+> ```
+>
+> 台账随 PR 提交（`proposals/signals/`，一条信号一个文件）。收尾说明里给出台账条数，并提示拿批的人可以跑 `python3 scripts/evolve_signals.py export` 生成可粘贴的 issue / MR 描述。后续步骤（查重、产骨架、验证门、judgement）整段跳过。
+>
+> **只记现场，不做验证**：本档不跑实验、不设计验证、不写预测与目标值。已经跑过的命令与输出可以写进 `--evidence`，没跑过的不许编——下游凑出来的判据上游不会采信，反而把「现象」污染成「结论」。判优先级、读组件、写 `measure`、跑验证都在上游手动跑深度轮时做。
+
 
 1. **先读候选水位**（产卡前的机械检查，别靠自觉）：`python3 scripts/ev_proposal.py --waterline`
    ——输出「待回写/待合入 N（上限 20）」，**超限退 1**；退 1 时本轮**只记信号不产卡**，先消化积压
@@ -265,6 +279,7 @@ evolve-check：产出 EV-xxxx（补 case，S2 replay 佐证缺口）→ agent �
 | 能力 | 工具/入口 |
 |---|---|
 | 读部署声明（第 0 步） | `scripts/evolve_mode.py`（`--json` 取 mode+source；缺文件 = full，写坏 exit 2） |
+| 写信号台账（第 3 步 record-only） | `scripts/evolve_signals.py add / list / export`（一条信号一个文件，内容哈希命名） |
 | 读本轮执行现场（第 1 步） | `scripts/tail_exec_log.py`（确定性入口；文件缺失/空表 = 正常退化，exit 0） |
 | 落收尾记录（第 4 步） | `scripts/log_skill_exec.py --skill evolve-check` + 自查 `scripts/verify_exec_log.py --check` |
 | 查重/产卡骨架 | `scripts/ev_proposal.py --list / --new` |

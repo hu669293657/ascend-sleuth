@@ -30,7 +30,7 @@
   - 关键人审（`default`，默认）：自动跑，需要判断的改动攒到轮末一个批 PR 给你审；`auto` 级改动即时合入，适合你想把关的场景。
   - 全自动（`hands-off`，需要你明确要求）：agent 改到目标完成，一次性给你一个批 PR 审。每个改动有记录 + 验证 + 独立 commit，高风险项会标注。
 
-### 只要沉淀内容、不要 EV 卡（内网 fork 的常见形态）
+### 只要沉淀内容、不要 EV 卡（只做内容沉淀的下游部署）
 
 说「这个部署只沉淀、不要产卡」，或者直接跑：
 
@@ -38,7 +38,17 @@
 python3 scripts/evolve_mode.py --set record-only
 ```
 
-它写仓库根的 `deployment.yaml`（每部署一份、不参与合并）。提交后对这个仓的所有检出与所有 agent 生效；没提交时只有本工作区生效。之后内容流程收尾仍然检查信号、仍然落执行记录，但不产卡、不跑验证门：需要改机制的部分写进 MR 描述或 issue 交上游。
+它写仓库根的 `deployment.yaml`（每部署一份、不参与合并）。提交后对这个仓的所有检出与所有 agent 生效；没提交时只有本工作区生效。之后内容流程收尾仍然检查信号、仍然落执行记录，但不产卡、不跑验证门：命中的信号写进台账 `proposals/signals/`（一条信号一个文件，随 PR 提交）。
+
+把台账交给上游的方式：
+
+```bash
+python3 scripts/evolve_signals.py list            # 看有哪些信号、重复了几次
+python3 scripts/evolve_signals.py export          # 生成可粘贴的 issue / MR 描述
+python3 scripts/evolve_signals.py export --out signals.md --since 2026-10-01
+```
+
+导出的是纯 Markdown：每条信号一节，带组件、证据、建议、出处与出现次数。贴到 issue 或 MR 描述里即可；上游维护者按它产卡并验证。
 
 看当前生效的值与来源：`python3 scripts/evolve_mode.py`（`doctor` 的「演进模式」那一行也是同一读数）。改回去用 `--set full`；环境变量 `ASCEND_SLEUTH_EVOLUTION` 可临时覆盖一次运行，不当团队声明。
 
