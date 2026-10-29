@@ -2631,12 +2631,25 @@ return {
       for (const s of r.sessions || []) {
         // 侧栏的行号是 harness 会话号；轨迹自己的 session_id 是诊断名，两套不能混用。
         // 没写 harness_session 的轨迹定位不到任何一行——跳过，不猜。
-        if (!s || !s.feedbackPending || !s.harnessSession) continue
+        if (!s || !s.harnessSession) continue
+        // 行首那一格只回答一件事：**这里有没有人欠着什么，或者有没有可复用的东西**。
+        // 两种记号，排序即优先级——欠着的事比可复用的东西更该被看见：
+        //   pending   给了 fix、等现场回报（这一条是债，等人）
+        //   reusable  知识库里留下了东西（已沉淀 / 命中且库里已有）——值得再点开
+        // 其余（在查 / 已转上游 / 不跟了 / 空记录）不画：宿主的运行中状态点已经在那一格，
+        // 而"已定位且无人欠账"是常态，画出来等于人人有记号。
+        const sedimented = s.sedimented && s.sedimented.state && s.sedimented.state !== 'none'
+        const mark = s.feedbackPending ? 'pending'
+          : ((sedimented || s.activeCaseInKb) ? 'reusable' : null)
+        if (!mark) continue
         marks.push({
           sessionId: s.harnessSession,
+          mark: mark,
           kind: s.feedbackKind === 'case' ? 'case' : 'no-case',
-          caseId: s.feedbackCase || null,
-          since: s.feedbackPendingSince || s.updatedAt || s.createdAt || null,
+          caseId: s.feedbackCase || s.activeCase || null,
+          since: s.feedbackPending ? (s.feedbackPendingSince || s.updatedAt || s.createdAt || null) : null,
+          status: s.status ? String(s.status) : '',
+          sedimented: !!sedimented,
         })
       }
       return { ok: true, marks }
