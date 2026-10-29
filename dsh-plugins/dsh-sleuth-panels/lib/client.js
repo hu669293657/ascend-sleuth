@@ -1,6 +1,6 @@
 /* eslint-disable */
 // 生成物 —— 勿手改。由 `node scripts/build_panel_bundle.js` 从下列源文件拼出：
-//   dsh-plugins/ascend-panel/panel-client.js  (sha256:b685c4d61b2e)
+//   dsh-plugins/ascend-panel/panel-client.js  (sha256:826a98e49989)
 //   dsh-plugins/ev-panel/panel-client.js  (sha256:f684735469ce)
 //   dsh-plugins/sleuth-console/console-client.js  (sha256:119062e6c579)
 // 校验：`node scripts/build_panel_bundle.js --check`。
@@ -70,7 +70,7 @@ window.__ModuleLoader__.load({
       id: 'ascend-panel',
       build(host, styles) {
         return (function () {
-// ---- dsh-plugins/ascend-panel/panel-client.js (sha256:b685c4d61b2e) 原文开始 ----
+// ---- dsh-plugins/ascend-panel/panel-client.js (sha256:826a98e49989) 原文开始 ----
 return {
   apply(ctx) {
     const slots = ctx.get('slots')
@@ -399,11 +399,15 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
 /* 会话行的「待回报」标记（L2 行首空心点 + L1 悬停卡一行）。
    为什么是空心点：侧栏自己的状态点是实心（运行中/完成/未读），空心与它区分开——这是
    "欠账"，不是"会话在跑"。颜色用 amber（需处理，不是错误）。 */
-.sleu-row-dot{display:inline-block;width:6px;height:6px;border-radius:999px;border:1.4px solid var(--acc-amber);box-sizing:border-box;vertical-align:middle}
+/* 行首记号：一格里只画一个形状。形状=记号种类（缺环 vs 菱形），颜色=同一件事的强弱，
+   不靠颜色单独区分（色弱读者要能只凭形状认出来）。8px 是能在侧栏 280px 宽度里不糊的下限。 */
+.sleu-row-dot{display:inline-block;width:8px;height:8px;border-radius:999px;border:1.5px solid var(--acc-amber);border-right-color:transparent;transform:rotate(-45deg);box-sizing:border-box;vertical-align:middle}
+.sleu-row-gem{display:inline-block;width:7px;height:7px;background:var(--acc-purple);border-radius:1px;transform:rotate(45deg);vertical-align:middle}
 /* 悬停卡很窄：标题一行（欠多久）、细节一行（自哪天 + 等什么），超长换行不截字 */
 .sleu-hover-mark{display:flex;flex-direction:column;gap:1px;margin-top:3px;font-size:var(--t-sm);line-height:var(--lh-base)}
 .sleu-hover-title{color:var(--c-amber);font-weight:600}
 .sleu-hover-detail{color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
+.sleu-hover-axis{color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
 `
     const tokenSheet = styles.insert(PANEL_CSS)
 
@@ -4087,10 +4091,9 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
       return mark
     }
 
-    // 欠账的三个片段。悬停卡很窄（侧栏 280px 里的一张卡），所以这里不用一整句：
-    // 标题给"欠多久"，第二行给"从哪天起 + 等什么"，各一行；超出由 CSS 换行，不截字。
-    // `since` 是 skill 写进 trace 的 `feedback_pending_since`——按 updatedAt 猜会把"最近动过这一单"
-    // 读成"刚欠下"，所以缺它时如实写"起算日未记录"，不拿别的日期顶。
+    // 记号的文案片段。悬停卡很窄（侧栏 280px 里的一张卡），所以不用一整句：
+    // 一行说"该不该管"，一行说起算日与命中，第三行只在两轴并存时说明它们不矛盾。
+    const STATUS_LABEL = { resolved: '已定位', in_progress: '进行中', escalated: '已转上游', archived: '不再跟进', unknown: '状态未记' }
     function markBits(mark) {
       if (!mark) return null
       const t = mark.since ? new Date(mark.since).getTime() : NaN
@@ -4104,29 +4107,45 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
         since = '自 ' + p(d.getMonth() + 1) + '-' + p(d.getDate())
       }
       const hit = mark.kind === 'case' && mark.caseId ? '命中 ' + mark.caseId : '未命中 case'
-      return { debt: debt, since: since, hit: hit }
+      const pending = mark.mark === 'pending'
+      // 标题：待回报给"欠多久"（要人做的动作），可复用给"是什么"（能拿来用的东西）
+      const title = pending ? '待回报 · ' + debt : '知识库可复用'
+      let detail = since + ' · ' + hit
+      if (!pending) {
+        const bits2 = []
+        if (mark.caseId) bits2.push('命中 ' + mark.caseId + '（库中已有）')
+        if (mark.sedimented) bits2.push('已沉淀')
+        detail = bits2.length ? bits2.join(' · ') : '知识库里有可复用的条目'
+      }
+      // 第三行只在"已收尾但还欠回报"时出现：这正是读者会读成矛盾的组合。
+      const axis = (pending && mark.status === 'resolved')
+        ? '诊断状态 ' + (STATUS_LABEL[mark.status] || mark.status) + '（收尾与回报是两条轴）'
+        : ''
+      return { pending: pending, title: title, detail: detail, axis: axis, debt: debt, since: since, hit: hit }
     }
 
-    // L1：悬停卡里的两行（悬停 800ms 后出现；侧栏自己的卡已有标题与时间，这里只加欠账）
+    // L1：悬停卡里的两到三行（悬停 800ms 后出现；侧栏自己的卡已有标题与时间，这里只加欠账/可复用）
     function TraceRowHover(props) {
       const mark = useTraceMark(props && props.sessionId)
       if (!mark) return null
       const bits = markBits(mark)
       return React.createElement('div', { className: 'sleu-hover-mark' },
-        React.createElement('div', { className: 'sleu-hover-title' }, '待回报 · ' + bits.debt),
-        React.createElement('div', { className: 'sleu-hover-detail' }, bits.since + ' · ' + bits.hit),
+        React.createElement('div', { className: 'sleu-hover-title' }, bits.title),
+        React.createElement('div', { className: 'sleu-hover-detail' }, bits.detail),
+        bits.axis ? React.createElement('div', { className: 'sleu-hover-axis' }, bits.axis) : null,
       )
     }
 
-    // L2：行首空心点。DSH 只在"空闲且已读"的行渲染这个位置（运行中/未读先让给它的状态点），
-    // 所以这是尽力而为的标记，不是每行都有的徽标。
+    // L2：行首记号。两种形状——缺环（待回报，等人）与实心菱形（知识库可复用，值得点开），
+    // 靠形状与颜色**双通道**区分。DSH 只在"空闲且已读"的行渲染这个位置（运行中/未读先让给
+    // 它的状态点），所以这是尽力而为的标记，不是每行都有的徽标。
     function TraceRowLeading(props) {
       const mark = useTraceMark(props && props.sessionId)
       if (!mark) return null
       const bits = markBits(mark)
-      const label = '待回报 · ' + bits.debt + ' · ' + bits.since + ' · ' + bits.hit
+      const label = [bits.title, bits.detail, bits.axis].filter(Boolean).join(' · ')
       return React.createElement('span', {
-        className: 'sleu-row-dot',
+        className: bits.pending ? 'sleu-row-dot' : 'sleu-row-gem',
         role: 'img',
         'aria-label': label,
         title: label,

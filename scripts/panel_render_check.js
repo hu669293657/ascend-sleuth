@@ -772,8 +772,9 @@ async function main() {
         return {
           ok: true,
           marks: [
-            { sessionId: 'sess-1', kind: 'case', caseId: 'hccl-timeout-007', since: '2026-09-12' },
-            { sessionId: 'sess-2', kind: 'no-case', caseId: null, since: '' },
+            { sessionId: 'sess-1', mark: 'pending', kind: 'case', caseId: 'hccl-timeout-007', since: '2026-09-12', status: 'resolved' },
+            { sessionId: 'sess-2', mark: 'pending', kind: 'no-case', caseId: null, since: '', status: 'in_progress' },
+            { sessionId: 'sess-3', mark: 'reusable', kind: 'case', caseId: 'hccl-timeout-007', since: null, status: 'resolved', sedimented: true },
           ],
         }
       }
@@ -805,9 +806,16 @@ async function main() {
 
     const leadOne = textOf(await renderSeat(leadSeat[0], { sessionId: 'sess-1' }))
     expect('行首：命中 case 的行带天数、起算日与 case', /待回报 · 欠 \d+ 天 · 自 \d{2}-\d{2} · 命中 hccl-timeout-007/.test(leadOne), leadOne)
+    expect('行首：已定位且欠回报时说明两条轴不矛盾', /诊断状态 已定位/.test(leadOne), leadOne)
     const leadNone = textOf(await renderSeat(leadSeat[0], { sessionId: 'sess-2' }))
     expect('行首：缺起算日时如实写「起算日未记录」', /起算日未记录/.test(leadNone), leadNone)
     expect('行首：未命中 case 与命中 case 分开说', /未命中 case/.test(leadNone) && !/命中 hccl-timeout-007/.test(leadNone), leadNone)
+    // 第二种记号：可复用（知识库里有东西）——形状是菱形，不写"待回报"（那不是债）
+    const leadReuseTree = await renderSeat(leadSeat[0], { sessionId: 'sess-3' })
+    const leadReuse = textOf(leadReuseTree)
+    expect('行首：可复用的会话用第二种记号', leadReuseTree !== null && leadReuseTree.type === 'span'
+      && /sleu-row-gem/.test(String(leadReuseTree.props && leadReuseTree.props.className)), String(leadReuse))
+    expect('行首：可复用写「知识库可复用」而不是「待回报」', /知识库可复用/.test(leadReuse) && !/待回报/.test(leadReuse), leadReuse)
     const leadUnknown = await renderSeat(leadSeat[0], { sessionId: 'no-such-session' })
     expect('行首：没有欠账的会话不渲染节点', leadUnknown === null || leadUnknown === undefined, String(leadUnknown))
 
