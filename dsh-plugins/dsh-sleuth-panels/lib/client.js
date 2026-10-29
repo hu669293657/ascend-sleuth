@@ -1,6 +1,6 @@
 /* eslint-disable */
 // 生成物 —— 勿手改。由 `node scripts/build_panel_bundle.js` 从下列源文件拼出：
-//   dsh-plugins/ascend-panel/panel-client.js  (sha256:e49ebe32cd18)
+//   dsh-plugins/ascend-panel/panel-client.js  (sha256:a389e9c8803f)
 //   dsh-plugins/ev-panel/panel-client.js  (sha256:f684735469ce)
 //   dsh-plugins/sleuth-console/console-client.js  (sha256:119062e6c579)
 // 校验：`node scripts/build_panel_bundle.js --check`。
@@ -70,7 +70,7 @@ window.__ModuleLoader__.load({
       id: 'ascend-panel',
       build(host, styles) {
         return (function () {
-// ---- dsh-plugins/ascend-panel/panel-client.js (sha256:e49ebe32cd18) 原文开始 ----
+// ---- dsh-plugins/ascend-panel/panel-client.js (sha256:a389e9c8803f) 原文开始 ----
 return {
   apply(ctx) {
     const slots = ctx.get('slots')
@@ -83,6 +83,158 @@ return {
     const timer = ctx.get('timer')
     // 搜索防抖的待执行句柄：新按键先撤掉上一次，避免"清空后旧的定时器又把词写回来"。
     let queryTimerDispose = null
+
+    // —— 切到一个 DSH 会话（卡片上的「打开会话」与侧栏「诊断记录」共用）——
+    // 服务怎么取：cordis 的服务要声明进 inject 才建键（第一版没声明，拿到的是空）。
+    // 声明后拿到了**对象**，但它不是文档里那个 `{ open }` 面——所以这里不再对方法名做假设：
+    // 接受任何对象，按候选方法名依次试，谁成功用谁；都不成才把对象上的方法名列出来。
+    // 这份"实测优先"的写法是被两轮无效排查逼出来的：先声明、再猜方法名，比继续读文档快。
+    let sessionsRef
+    function noteSessions(v) {
+      if (v && typeof v === 'object' && sessionsRef === undefined) sessionsRef = v
+      return sessionsRef
+    }
+    try { noteSessions(ctx.sessions) } catch (e) { /* 未声明时可能抛，忽略 */ }
+    try { noteSessions(ctx.get('sessions')) } catch (e) { /* 同上 */ }
+    let injectCbFired = '未触发'
+    try {
+      if (typeof ctx.inject === 'function') {
+        ctx.inject(['sessions'], (scope) => {
+          injectCbFired = '已触发'
+          try { noteSessions(scope.get('sessions')) } catch (e) { /* 子 fiber 也没有就继续走探针 */ }
+          try { noteSessions(scope.sessions) } catch (e) { /* 同上 */ }
+        })
+      }
+    } catch (e) { injectCbFired = '注册抛：' + String((e && e.message) || e) }
+
+    // 一个对象上可调用的方法名（含原型链，最多 4 层）——报错时用来替代"再读一遍文档"。
+    function methodNamesOf(o) {
+      const out = []
+      let cur = o
+      let depth = 0
+      while (cur && cur !== Object.prototype && depth < 4) {
+        for (const k of Object.getOwnPropertyNames(cur)) {
+          if (out.indexOf(k) >= 0) continue
+          try { if (typeof o[k] === 'function') out.push(k) } catch (e) { /* getter 抛就算了 */ }
+        }
+        cur = Object.getPrototypeOf(cur)
+        depth += 1
+      }
+      return out
+    }
+
+    // 切会话的方法名候选：文档里叫 `open`，实测的那一版不是；其余是同义常见写法。
+    const OPEN_METHODS = ['open', 'openSession', 'select', 'selectSession', 'show', 'activate', 'focus', 'switchTo']
+
+    function sessionsProbe() {
+      const names = ['sessions', 'connection', 'slots', 'workspaces', 'uiWorkspace', 'conversation', 'remote']
+      const seen = []
+      for (const n of names) {
+        try {
+          const v = ctx.get(n)
+          seen.push(n + (v === undefined ? '=空' : '=' + typeof v))
+        } catch (e) {
+          seen.push(n + '=抛')
+        }
+      }
+      const describe = (label, obj) => {
+        if (!obj) return label + '=（空）'
+        const fns = methodNamesOf(obj)
+        if (fns.length) return label + ' 方法：' + fns.slice(0, 16).join('、')
+        let keys = []
+        try { keys = Object.keys(obj).slice(0, 12) } catch (e) { keys = [] }
+        return label + ' 无方法；字段：' + (keys.length ? keys.join('、') : '（连字段都没有）')
+      }
+      let uiWs
+      try { uiWs = ctx.get('uiWorkspace') } catch (e) { uiWs = undefined }
+      // 读 `sessions.open` 本身会不会抛：cordis 对"没声明/未激活"的服务是**抛**而不是返回空，
+      // 这一条能把"方法不存在"和"服务对我们不可见"分开。
+      let openRead = '（没有对象）'
+      if (sessionsRef) {
+        try {
+          openRead = typeof sessionsRef.open === 'function' ? '函数' : '空'
+        } catch (e) {
+          openRead = '抛：' + String((e && e.message) || e)
+        }
+      }
+      return '实测：' + seen.join('、')
+        + '；sessions.open 读取=' + openRead
+        + '；ctx.inject 回调=' + injectCbFired
+        + '；' + describe('sessions', sessionsRef) + '；' + describe('uiWorkspace', uiWs)
+    }
+
+    function sessionsService() {
+      if (sessionsRef !== undefined) return sessionsRef
+      try { noteSessions(ctx.get('sessions')) } catch (e) { /* 未声明 */ }
+      try { noteSessions(ctx.sessions) } catch (e) { /* 同上 */ }
+      return sessionsRef
+    }
+
+    // `sessions.open(id)` 对**不在客户端列表里**的 id 会抛（`sessions.select: unknown session …`）。
+    // traces/ 里有从别的机器接手的单（`import_trace.py` 落位的那批），那些会话在本机不存在，
+    // 所以这里把结果收成对象：调用方按结果给一句人话，不让异常从 React 事件里甩出去变成
+    // "点了没反应"。第二枪先拉一次 Host 权威列表再开——列表是快照，久未活动的会话可能还没进来
+    // （`refresh()` 是客户端服务已有的公开方法，见 sessions 服务面）。
+    async function openSession(id) {
+      const sessions = sessionsService()
+      if (sessions === undefined) {
+        return { ok: false, reason: '插件没拿到会话服务。' + sessionsProbe() }
+      }
+      const target = String(id)
+      // 候选：在两个可能承载"切会话"的服务上，按候选方法名依次试（谁成功用谁）。
+      const hosts = [['sessions', sessions]]
+      try {
+        const uiWs = ctx.get('uiWorkspace')
+        if (uiWs) hosts.push(['uiWorkspace', uiWs])
+      } catch (e) { /* 没有这个服务就只试 sessions */ }
+      const tried = []
+      for (const [hostName, host] of hosts) {
+        for (const name of OPEN_METHODS) {
+          let fn
+          try { fn = host[name] } catch (e) { continue }
+          if (typeof fn !== 'function') continue
+          tried.push(hostName + '.' + name)
+          try {
+            fn.call(host, target)
+            return { ok: true }
+          } catch (first) {
+            const why = String((first && first.message) || first)
+            // "不在列表里"这一类值得刷新后在同一方法上再试一次；其它异常继续试下一个名字。
+            if (!/unknown session|not listed|不存在/i.test(why)) continue
+            try { if (typeof sessions.refresh === 'function') await sessions.refresh() } catch (e) { /* 刷新失败就按原样报 */ }
+            try {
+              fn.call(host, target)
+              return { ok: true }
+            } catch (second) {
+              return { ok: false, reason: '拉过最新列表仍然没有这一条（外来单或已归档）：' + String((second && second.message) || second) }
+            }
+          }
+        }
+      }
+      return { ok: false, reason: '试过 ' + (tried.length ? tried.join(' / ') : '（没有可用的打开方法）') + ' 都没打开。' + sessionsProbe() }
+    }
+
+    // —— 诊断记录浮层：侧栏页脚的入口与全帧浮层是两个独立注册，靠这个小 store 同步开关 ——
+    // 两处落在不同的 React 树里（页脚在侧栏列内，浮层在帧级图层），不能用 props 传开关；
+    // 也不能用全局定时器或全局事件（动态包沙箱没有它们）。订阅者各持一份本地 state。
+    const ledger = { open: false, listeners: new Set() }
+    function setLedgerOpen(next) {
+      const v = !!next
+      if (ledger.open === v) return
+      ledger.open = v
+      ledger.listeners.forEach(fn => { try { fn(v) } catch (e) { /* 单个订阅者出错不拖累其余 */ } })
+    }
+    function useLedgerOpen() {
+      const [open, setOpen] = React.useState(ledger.open)
+      React.useEffect(() => {
+        const fn = v => setOpen(v)
+        ledger.listeners.add(fn)
+        // 订阅建立之前开关可能已经变过（先点入口、后挂浮层），所以补读一次当前值。
+        setOpen(ledger.open)
+        return () => { ledger.listeners.delete(fn) }
+      }, [])
+      return open
+    }
 
     const T = {
       bg: 'var(--dsw-alias-bg-layer-1)', bg2: 'var(--dsw-alias-bg-layer-2)',
@@ -230,6 +382,19 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
 .sleu-fold-compact[open]>summary{border-color:var(--d-blue);background:var(--tint-blue)}
 .sleu-fold-compact .sleu-fold-body{padding:6px 0 0}
 .sleu-fold-body>div:first-child>.sleu-block:first-child,.sleu-fold-body>.sleu{margin-top:0}
+/* 诊断记录浮层：侧栏页脚的入口 + 帧级浮层本体。浮层落在 shell.overlay 那一层（点击穿透），
+   所以根节点自己把 pointer-events 打开；卡片用 fixed 定位，不挤动下方任何列。 */
+.sleu-ledger-backdrop{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-start;justify-content:center;padding:8vh 16px 24px;background:color-mix(in srgb, var(--dsw-alias-label-primary) 22%, transparent);pointer-events:auto}
+.sleu-ledger-card{display:flex;flex-direction:column;width:min(780px,100%);max-height:76vh;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--hair);border-radius:var(--r-lg);box-shadow:0 18px 48px color-mix(in srgb, var(--dsw-alias-label-primary) 24%, transparent);overflow:hidden}
+.sleu-ledger-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--hair);flex-wrap:wrap}
+.sleu-ledger-body{overflow:auto;padding:4px 0}
+.sleu-ledger-row{display:grid;grid-template-columns:72px minmax(0,1.4fr) minmax(0,1.6fr) auto auto;gap:10px;align-items:center;width:100%;padding:9px 14px;border:none;background:transparent;color:var(--dsw-alias-label-primary);text-align:left;cursor:pointer;font:inherit;transition:background-color var(--m-fast) var(--e-out)}
+.sleu-ledger-row:hover{background:var(--tint-blue)}
+.sleu-ledger-row:focus-visible{outline:2px solid var(--d-blue);outline-offset:-2px}
+.sleu-ledger-sid{font-family:var(--font-mono);font-size:var(--t-tiny);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sleu-ledger-sum{font-size:var(--t-sm);color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sleu-ledger-empty{padding:26px 16px;text-align:center;color:var(--dsw-alias-label-secondary);font-size:var(--t-md);line-height:var(--lh-prose)}
+.sleu-ledger-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 14px;border-top:1px solid var(--hair);font-size:var(--t-tiny);color:var(--dsw-alias-label-secondary)}
 @media (prefers-reduced-motion: reduce){.sleu,.sleu *{animation-duration:.001ms !important;animation-delay:0ms !important;transition-duration:.001ms !important}}
 /* 会话行的「待回报」标记（L2 行首空心点 + L1 悬停卡一行）。
    为什么是空心点：侧栏自己的状态点是实心（运行中/完成/未读），空心与它区分开——这是
@@ -292,7 +457,7 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
     // 构建时注入的面板包版本（`scripts/build_panel_bundle.js` 把占位符换成 package.json 的 version）。
     // 为什么要有：面板是「装进 profile 的常驻插件 + 浏览器按 rev 缓存」两层，改完看不到新版时
     // 无法区分"装的还是旧包"与"浏览器缓存了旧 bundle"。有这个串，一眼就能判。
-    const PANEL_VERSION = '0.7.4'
+    const PANEL_VERSION = '0.7.5'
 
     function shortUrl(u) {
       const s = String(u).replace(/^https?:\/\//i, '')
@@ -810,6 +975,28 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
       return isSubmittedOf(s) && !isClosedOf(s)
     }
 
+    // —— 「价值优先」的唯一一份判据（诊断 tab 的排序与侧栏「诊断记录」共用）——
+    // 只看 trace 已有的字段，不新增口径，每一档都指到本仓已有的一条轴：
+    //   5 已沉淀（`sedimented.state` 有值）——知识库里留下了东西，最值得复用
+    //   4 命中且库里已有（`activeCaseInKb`）——能直接拿来对照
+    //   3 命中但库里还没有（新形态）——先看，可能值得沉淀
+    //   2 有 fix 且回报已生效（`feedback: resolved`）——结论被现场验证过
+    //   1 已定位（`status: resolved`）——有根因，但库里没有对应案例
+    //   0 其余（在查 / 转上游 / 不再跟进 / 空记录）
+    // 同档按最后更新时间倒序：同档之间没有更强的次序理由，别拿拍脑袋的第二判据凑。
+    function valueRankOf(s) {
+      if (sedStateOf(s) !== 'none') return 5
+      if (caseKindOf(s) === 'case') return s.activeCaseInKb ? 4 : 3
+      if (String(s.feedback || '') === 'resolved') return 2
+      if (s.status === 'resolved') return 1
+      return 0
+    }
+    function updatedTsOf(s) {
+      const raw = s.updatedAt || s.createdAt
+      const t = raw ? new Date(raw).getTime() : NaN
+      return isNaN(t) ? 0 : t
+    }
+
     // 解析异常的一句话（host 的 `parseAnomaly`）。卡面只给"结论 + 行号"，成因与怎么办放 README——
     // 面板读者只看界面，卡上多一句解释就把列表读成文档（实测反馈：这类说明性文字被点过两次）。
     function anomalyText(a) {
@@ -1144,6 +1331,8 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
       const [evOpen, setEvOpen] = React.useState(null)
       const [tcOpen, setTcOpen] = React.useState(null)   // 关联面：展开哪一步的工具调用清单
       const [opening, setOpening] = React.useState(null)
+      // 「打开会话」失败的那句话（成功会切走，不需要回显）
+      const [navErr, setNavErr] = React.useState(null)
       // 打开反馈按**目标**记：谁被点，明细就显示在谁旁边（不再只落在卡头那一行）
       const [openErr, setOpenErr] = React.useState(null)    // {at, msg}
       const [openDone, setOpenDone] = React.useState(null)  // {at, via}
@@ -2088,10 +2277,33 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
       }, a.label)
       const resumeAction = actions.filter(a => a.key === 'rs')[0] || null
       const closeActions = actions.filter(a => a.key !== 'rs')
+      // 「打开会话」：从诊断记录里直接切到这一单的会话，不必回左侧列表里按会话号找。
+      // **只能用 `harness_session`**：`session_id` 是诊断自己起的名字（形如
+      // `<日期>-<issue 号>-<短名>`），DSH 的会话号是 `session-<uuid>`，两者不是一回事——
+      // 拿名字去 open 每一次都会抛（实测：第一版用错号，20 单全点不动，就是这一条）。
+      // 没记会话号的老单不给按钮：给一个点了必失败的按钮比不给更坏。
+      // 它是**切走**的动作（点了就离开面板），所以成功不需要回显；失败要说话——
+      // 外来单（import_trace.py 接手的那批）在本机没有这个会话，静默会被读成"面板坏了"。
+      const harnessSession = s.harnessSession ? String(s.harnessSession) : ''
+      const navBtn = harnessSession
+        ? React.createElement('button', {
+            type: 'button', title: '切到这条诊断的会话（' + harnessSession + '）',
+            onClick: () => {
+              openSession(harnessSession).then(res => setNavErr(res.ok ? null : res.reason))
+            },
+            style: { background: 'transparent', border: '1px solid ' + T.brand, color: T.brand, borderRadius: 'var(--r-pill)', padding: '2px 11px', fontSize: 'var(--t-tiny)', fontWeight: 600, cursor: 'pointer' },
+          }, '打开会话')
+        : React.createElement('span', {
+            title: '这单的轨迹没记 harness_session（写入该字段之前的单），定位不到 DSH 会话。'
+              + '补法：python3 scripts/link_harness_sessions.py --apply',
+            style: { color: T.text2, fontSize: 'var(--t-tiny)', border: '1px dashed ' + T.border, borderRadius: 'var(--r-pill)', padding: '2px 10px' },
+          }, '未记会话号')
       // 展开的命令块只出现一次（谁被点开就显示谁）；选中关系靠"命令块在最下方"表达，
       // 不再用 opacity 压未选中的按钮——那会把白字压到 2.07:1（AA 要求 4.5）。
       const actionArea = React.createElement('div', { style: { margin: '0 16px', padding: '10px 0 14px', borderTop: '1px solid var(--hair)' } },
         React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          navBtn,
+          navErr ? React.createElement('span', { style: { color: 'var(--c-amber)', fontSize: 'var(--t-tiny)' } }, navErr) : null,
           docRow,
           resumeAction ? cmdButton(resumeAction) : null,
           closeActions.length ? menuBtn('close', '收尾', '生成收尾指令（复制后粘到对话执行）') : null,
@@ -2318,6 +2530,8 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
         })
       }, [])
       const [timeRange, setTimeRange] = React.useState('all')
+      // 列表排序：'time' 按 trace 的既有顺序（最后更新倒序，host 给的），'value' 见下方 valueRankOf
+      const [sortBy, setSortBy] = React.useState('time')
       // 切筛选就清空勾选与展开的批量指令：勾选只在「待升格」这一屏里有意义，
       // 带着上一屏的选择去点批量闭环，最容易把没看过的单一起标掉。
       React.useEffect(() => { setSel({}); setBatchCmd(null); setBatchCopied(null) }, [kbFilter])
@@ -2409,6 +2623,12 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
           const t = s.createdAt ? new Date(s.createdAt).getTime() : NaN
           return !isNaN(t) && t >= cut
         })
+      }
+      // 「价值优先」：会话攒多以后，按时间排会把"值得先看的那几单"埋在最底下。
+      // 判据（`valueRankOf` / `updatedTsOf`）放在 apply 作用域里与侧栏「诊断记录」共用一份——
+      // 两处各写一份就会漂移，读者会得到两套"价值"。
+      if (sortBy === 'value') {
+        sessions = sessions.slice().sort((a, b) => valueRankOf(b) - valueRankOf(a) || updatedTsOf(b) - updatedTsOf(a))
       }
       // 待跟进三类见上方计数处注释（互斥）；徽章与横幅都用这三个数
       const badge = [
@@ -2603,6 +2823,13 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
               onChange: e => setTimeRange(e.target.value),
               style: { padding: '7px 8px', fontSize: 'var(--t-tiny)', borderRadius: 'var(--r-md)', border: '1px solid var(--hair)', background: T.bg, color: T.text, cursor: 'pointer' },
             }, [['all', '全部时间'], ['7', '近 7 天'], ['30', '近 30 天'], ['90', '近 90 天']].map(p => React.createElement('option', { key: p[0], value: p[0] }, p[1]))),
+            // 排序与时间筛选并排：两个都是"这一屏看什么"的开关，分开摆会被当成两套设置。
+            React.createElement('select', {
+              value: sortBy, 'aria-label': '会话排序',
+              title: '按时间 = 最后更新时间倒序（默认）；按价值 = 已沉淀 ＞ 库中已有案例 ＞ 新形态 ＞ fix 已生效 ＞ 已定位 ＞ 其余，同档按更新时间倒序',
+              onChange: e => setSortBy(e.target.value),
+              style: { padding: '7px 8px', fontSize: 'var(--t-tiny)', borderRadius: 'var(--r-md)', border: '1px solid var(--hair)', background: T.bg, color: T.text, cursor: 'pointer' },
+            }, [['time', '排序：按时间'], ['value', '排序：按价值']].map(p => React.createElement('option', { key: p[0], value: p[0] }, p[1]))),
           ),
           batchBar,
           sessions.length ? React.createElement('div', { style: { display: 'grid', gridTemplateColumns: ROW_COLS, gap: 10, padding: '8px 16px 4px', marginTop: 4 } },
@@ -3907,6 +4134,149 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
     }
 
     // 会话 tab 只留「诊断」：它读的是这一单的轨迹。
+
+    // ============ 侧栏「诊断记录」（页脚入口 + 帧级浮层）============
+    // 为什么是这两处而不是会话列表本身：侧栏的会话行没有插件槽位，能注册的只有
+    // 「整个浏览区」（`sidebar.workspaces`，注册进去 = 接管自带列表）。所以走
+    // `sidebar.footer.action`（附加一个入口，不占自带那一格）+ `shell.overlay`
+    // （帧级浮层，点击穿透的附加层，无自带 occupant）。会话本身用 `sessions.open` 切过去。
+    function LedgerEntryButton(props) {
+      const wide = !!(props && props.wide)
+      const open = useLedgerOpen()
+      return React.createElement('button', {
+        type: 'button',
+        title: '诊断记录：按价值列出本工作区的诊断会话（已沉淀 / 命中案例 / 已定位 优先），点一行直接切过去',
+        'aria-label': '诊断记录', 'aria-expanded': open ? 'true' : 'false',
+        onClick: () => setLedgerOpen(!ledger.open),
+        style: {
+          display: 'flex', alignItems: 'center', justifyContent: wide ? 'flex-start' : 'center',
+          gap: 8, width: wide ? '100%' : 32, height: 32, padding: wide ? '0 10px' : 0,
+          boxSizing: 'border-box', border: '1px solid ' + T.border, borderRadius: 'var(--r-md)',
+          background: open ? 'color-mix(in srgb, ' + T.brand + ' 12%, transparent)' : 'transparent',
+          color: T.text, font: 'inherit', fontSize: 'var(--t-sm)', cursor: 'pointer',
+          transition: 'background-color var(--m-fast) var(--e-out)',
+        },
+      },
+        React.createElement('span', { 'aria-hidden': 'true', style: { fontSize: 'var(--t-md)', lineHeight: 1 } }, '☰'),
+        wide ? React.createElement('span', null, '诊断记录') : null)
+    }
+
+    // 浮层本体。数据走与「诊断」tab 同一条 RPC（`ascend-traces-list`），排序也用同一份
+    // `valueRankOf`——两处各算一份就会漂移。这里是**只读 + 导航**：不写 trace、不生成指令，
+    // 指令仍然在「诊断」tab 里（那条纪律见 skills/preload-panel/SKILL.md 的只读边界）。
+    function LedgerPanel() {
+      const open = useLedgerOpen()
+      const [state, setState] = React.useState({ loading: false, data: null })
+      const [q, setQ] = React.useState('')
+      const [navMsg, setNavMsg] = React.useState(null)
+      React.useEffect(() => {
+        if (!open) return undefined
+        let alive = true
+        // 刷新时保留手上那份（切走再切回不必空一屏）；`prev` 仍然防一手——
+        // 首帧之外没人保证它是本组件写进去的对象。
+        setState(prev => ({ loading: true, data: (prev && prev.data) || null }))
+        host.call('ascend-traces-list', { sessionId: null })
+          .then(r => { if (alive) setState({ loading: false, data: r }) })
+          .catch(() => { if (alive) setState({ loading: false, data: { ok: false, error: 'Host RPC 失败' } }) })
+        return () => { alive = false }
+      }, [open])
+      // Esc 关闭：浮层盖住整个界面，没有键盘出口会把人困在模态里。
+      React.useEffect(() => {
+        if (!open || typeof document === 'undefined') return undefined
+        const onKey = e => { if (e.key === 'Escape') { setNavMsg(null); setLedgerOpen(false) } }
+        document.addEventListener('keydown', onKey)
+        return () => { document.removeEventListener('keydown', onKey) }
+      }, [open])
+      if (!open) return null
+      // 两个本地 state 都按"读到什么就当什么"用：面板渲染检查用共享 hook 槽的 mock，
+      // 这里拿到的值可能来自别的组件（真实 React 不会），不该因此把整个 tab 拖崩。
+      const st = (state && typeof state === 'object') ? state : { loading: true, data: null }
+      const qText = typeof q === 'string' ? q : ''
+      const r = st.data
+      const all = (r && r.ok && Array.isArray(r.sessions)) ? r.sessions : []
+      const KW_LIMIT = 40
+      const kw = qText.trim().toLowerCase()
+      const matched = kw
+        ? all.filter(s => [s.sessionId, s.summarySnippet, s.activeCase, s.framework, s.platform, s.status]
+            .filter(Boolean).join(' ').toLowerCase().includes(kw))
+        : all
+      const shown = matched.slice()
+        .sort((a, b) => valueRankOf(b) - valueRankOf(a) || updatedTsOf(b) - updatedTsOf(a))
+        .slice(0, KW_LIMIT)
+      const close = () => { setNavMsg(null); setLedgerOpen(false) }
+      return React.createElement('div', {
+        className: 'sleu sleu-ledger-backdrop',
+        // 点遮罩关闭：只在遮罩自身被点中时触发，卡片内部的点击不会冒泡成关闭。
+        onMouseDown: e => { if (e.target === e.currentTarget) close() },
+      },
+        React.createElement('div', { className: 'sleu-ledger-card', role: 'dialog', 'aria-modal': 'true', 'aria-label': '诊断记录' },
+          React.createElement('div', { className: 'sleu-ledger-head' },
+            React.createElement('span', { style: { fontSize: 'var(--t-lg)', fontWeight: 700 } }, '诊断记录'),
+            React.createElement('span', { style: { color: T.text2, fontSize: 'var(--t-tiny)' } },
+              (r && r.ok) ? (all.length + ' 条诊断会话 · 按价值排') : '读不到诊断记录'),
+            React.createElement('input', {
+              value: qText, placeholder: '过滤会话号 / 背景 / 案例', 'aria-label': '过滤诊断记录',
+              onChange: e => setQ(e.target.value),
+              style: { marginLeft: 'auto', width: 190, padding: '6px 9px', fontSize: 'var(--t-sm)', borderRadius: 'var(--r-md)', border: '1px solid var(--hair)', background: T.bg, color: T.text },
+            }),
+            React.createElement('button', {
+              type: 'button', onClick: close, title: '关闭（Esc）', 'aria-label': '关闭诊断记录',
+              style: { border: 'none', background: 'transparent', color: T.text2, cursor: 'pointer', fontSize: 'var(--t-lg)', lineHeight: 1, padding: '2px 6px' },
+            }, '×'),
+          ),
+          navMsg ? React.createElement('div', { style: { padding: '6px 14px', color: 'var(--c-amber)', fontSize: 'var(--t-tiny)' } }, navMsg) : null,
+          st.loading && !r ? React.createElement('div', { className: 'sleu-ledger-empty' }, '正在读诊断记录…')
+            : (!r || !r.ok)
+              ? React.createElement('div', { className: 'sleu-ledger-empty' },
+                  '读不到诊断记录：' + String((r && r.error) || 'Host RPC 失败')
+                  + '。这一层只读 traces/；目录不在时先在仓库里跑一次诊断。')
+              : !all.length
+                ? React.createElement('div', { className: 'sleu-ledger-empty' },
+                    '这个工作区还没有诊断记录。跑一次 /skill:diagnose 之后会出现在这里。')
+                : React.createElement('div', { className: 'sleu-ledger-body' },
+                    shown.length
+                      ? shown.map(s => {
+                          const meta = statusMeta[String(s.status || 'unknown')] || statusMeta.unknown
+                          const hit = caseKindOf(s) === 'case'
+                          return React.createElement('button', {
+                            key: s.file || s.sessionId, type: 'button', className: 'sleu-ledger-row',
+                            title: s.harnessSession
+                              ? '切到会话 ' + String(s.harnessSession)
+                              : '这单没记 harness_session，点一下会说明补法',
+                            onClick: () => {
+                              if (!s.harnessSession) {
+                                setNavMsg('这单的轨迹没记 harness_session（写入该字段之前的单），定位不到会话；'
+                                  + '补法：python3 scripts/link_harness_sessions.py --apply')
+                                return
+                              }
+                              openSession(String(s.harnessSession)).then(res => {
+                                if (res.ok) close()
+                                else setNavMsg(res.reason)
+                              })
+                            },
+                          },
+                            React.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: 6, color: meta.color, fontSize: 'var(--t-sm)', fontWeight: 700, whiteSpace: 'nowrap' } },
+                              React.createElement(Dot, { color: meta.color, hollow: s.status === 'unknown' }), meta.label),
+                            React.createElement('span', { className: 'sleu-ledger-sid', title: String(s.sessionId || '') }, String(s.sessionId || '—')),
+                            React.createElement('span', { className: 'sleu-ledger-sum', title: s.summarySnippet || s.lastOutput || '' },
+                              s.summarySnippet || s.lastOutput || '（没有背景段）'),
+                            React.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end', whiteSpace: 'nowrap' } },
+                              hit ? React.createElement('span', { style: Object.assign(tinyBadge('var(--d-green)'), { fontSize: 'var(--t-tiny)' }) }, String(s.activeCase)) : null,
+                              sedStateOf(s) !== 'none' ? React.createElement('span', { style: Object.assign(tinyBadge('var(--d-purple)'), { fontSize: 'var(--t-tiny)' }) }, '已沉淀') : null,
+                              React.createElement('span', { style: { color: T.text2, fontSize: 'var(--t-tiny)' } }, relTime(s.updatedAt || s.createdAt) || '—')),
+                            React.createElement('span', { 'aria-hidden': 'true', style: { color: T.text2, fontSize: 'var(--t-md)' } }, '→'))
+                        })
+                      : React.createElement('div', { className: 'sleu-ledger-empty' }, '没有匹配「' + qText.trim() + '」的会话。'),
+                  ),
+          React.createElement('div', { className: 'sleu-ledger-foot' },
+            React.createElement('span', null, '排序：已沉淀 ＞ 库中已有案例 ＞ 新形态 ＞ fix 已生效 ＞ 已定位 ＞ 其余；同档按最后更新时间。'),
+            React.createElement('span', null, '只读 traces/，写操作仍在「诊断」tab 里生成指令。'),
+            all.length > KW_LIMIT ? React.createElement('span', null, '当前只列前 ' + KW_LIMIT + ' 条，搜索可收窄。') : null),
+        ),
+      )
+    }
+
+
     slots.inject('conversation.view', () => slots.register(
       { name: 'conversation.view', id: 'ascend-diagnose', order: 20, label: '诊断' },
       (props) => React.createElement(TraceView, props),
@@ -3931,6 +4301,17 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
     slots.inject('sidebar.session.row.hover', () => slots.register(
       { name: 'sidebar.session.row.hover', id: 'ascend-pending' },
       (props) => React.createElement(TraceRowHover, props),
+    ))
+    // 侧栏页脚：诊断记录入口。它是**附加**项（新 id 落在自带项旁边，不替换任何一格）；
+    // 侧栏收起时只剩图标（`wide: false`）。
+    slots.inject('sidebar.footer.action', () => slots.register(
+      { name: 'sidebar.footer.action', id: 'sleu-ledger-entry', order: 30, label: '诊断记录' },
+      (props) => React.createElement(LedgerEntryButton, props),
+    ))
+    // 帧级浮层：诊断记录本体。`shell.overlay` 是点击穿透的附加层，所以浮层自己打开 pointer-events。
+    slots.inject('shell.overlay', () => slots.register(
+      { name: 'shell.overlay', id: 'sleu-ledger-overlay', order: 40, label: '诊断记录' },
+      () => React.createElement(LedgerPanel),
     ))
   },
 }
@@ -5296,7 +5677,7 @@ return {
     ]
 
     exports.name = 'dsh-sleuth-panels'
-    exports.inject = ['slots', 'connection']
+    exports.inject = ['slots', 'connection', 'sessions']
     exports.apply = function apply(ctx) {
       const host = makeHost(ctx)
       const styles = makeStyles()

@@ -533,6 +533,11 @@ async function checkClient() {
   }
   const mod = entry.factory(requireStub)
   check(Array.isArray(mod.inject) && mod.inject.includes('slots'), 'inject 含 slots', JSON.stringify(mod.inject))
+  // `sessions` 必须在 inject 里：cordis 只对声明过的服务名建键，`ctx.get('sessions')` 未声明时
+  // 返回 undefined——「打开会话」与侧栏「诊断记录」都靠它切会话。缺了界面只剩一句
+  // "没有提供打开会话的接口"，而那看起来像 DSH 的锅（实测踩过一次）。
+  check(Array.isArray(mod.inject) && mod.inject.includes('sessions'),
+    'inject 含 sessions（切会话要用）', JSON.stringify(mod.inject))
 
   const registrations = []
   const slots = {
@@ -578,6 +583,10 @@ async function checkClient() {
     { name: 'conversation.view', id: 'ascend-diagnose', order: 20 },
     { name: 'sidebar.session.row.leading', id: 'ascend-pending' },
     { name: 'sidebar.session.row.hover', id: 'ascend-pending' },
+    // 诊断记录：侧栏页脚入口 + 帧级浮层。两个都是附加席位（自取新 id，不替换自带组件），
+    // 所以与上面「待回报」那两个座位分开列；order 只在本槽位内比较。
+    { name: 'sidebar.footer.action', id: 'sleu-ledger-entry', order: 30 },
+    { name: 'shell.overlay', id: 'sleu-ledger-overlay', order: 40 },
     { name: 'main', key: 'ascend-sleuth-console' },
     { name: 'sidebar.panellist', id: 'ascend-sleuth-console', order: 30 },
   ]
