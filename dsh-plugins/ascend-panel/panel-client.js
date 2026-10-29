@@ -651,8 +651,8 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
     //   `代理` = 用可计算的量代替真量（例如跨运行的分位用各运行分位的加权均值）
     //   `确定性` / `人工` 不标——满屏标签会让读的人不再看它们，而这两档没有"别同权"的风险。
     function StrengthBadge(strength) {
-      if (strength === '自报') return React.createElement('span', { title: '这个数由 agent 自报，属弱观测：可作趋势与异常信号，不当验收证据', style: tinyBadge('var(--d-purple)') }, '自报')
-      if (strength === '代理') return React.createElement('span', { title: '这个数用可计算的量代替真量（近似），看量级不看小数位', style: tinyBadge('var(--d-amber)') }, '代理')
+      if (strength === '自报') return React.createElement('span', { title: '这个数由 agent 自报，属弱观测：可作趋势与异常信号，不当验收证据', style: tinyBadge('var(--d-gray)') }, '自报')
+      if (strength === '代理') return React.createElement('span', { title: '这个数用可计算的量代替真量（近似），看量级不看小数位', style: tinyBadge('var(--d-gray)') }, '代理')
       // 没有强度档就**不挂徽标**。原先这里给每一行挂一个「未声明强度」，而知识库健康 / 流程闭环
       // 那些计数行（案例数、漏斗）本来就不参与强度体系——满屏的"未声明"只是噪声，
       // 读者会以为面板坏了。真正缺声明的情形在期卡顶部汇总一次（见 metrics tab 的缺口提示）。
@@ -665,9 +665,9 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
             React.createElement('div', { style: { display: 'flex', alignItems: 'baseline', gap: 7, flexWrap: 'wrap' } },
               React.createElement('span', { style: { color: T.text2, fontSize: 'var(--t-sm)' } }, label),
               total !== undefined && total !== null ? React.createElement('span', { style: { fontSize: 'var(--t-xl)', fontWeight: 700, fontFamily: 'var(--font-mono)', color: warn ? T.warn : T.text, letterSpacing: '-.01em' } }, total) : null,
-              small ? React.createElement('span', { title: '样本量 <5', style: tinyBadge('var(--d-amber)') }, '小样本') : null,
-              unreadable ? React.createElement('span', { title: unreadableWhy || '分母为 0：这个数不可解读', style: tinyBadge('var(--d-purple)') }, '不可解读') : null,
-              warn && !unreadable ? React.createElement('span', { style: tinyBadge('var(--d-amber)') }, '超限') : null,
+              small ? React.createElement('span', { title: '样本量 <5', style: tinyBadge('var(--d-gray)') }, '小样本') : null,
+              unreadable ? React.createElement('span', { title: unreadableWhy || '分母为 0：这个数不可解读', style: tinyBadge('var(--d-gray)') }, '不可解读') : null,
+              warn && !unreadable ? React.createElement('span', { style: tinyBadge('var(--d-red)') }, '超限') : null,
               StrengthBadge(strength),
             ),
             sub ? React.createElement('div', { style: { color: T.text2, fontSize: 'var(--t-tiny)', marginTop: 2, lineHeight: 'var(--lh-base)', wordBreak: 'break-word' } }, sub) : null,
@@ -676,8 +676,8 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
         : React.createElement(React.Fragment, null,
             React.createElement('span', { style: { color: T.text2, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 } },
               label,
-              small ? React.createElement('span', { title: '样本量 <5', style: tinyBadge('var(--d-amber)') }, '小样本') : null,
-              unreadable ? React.createElement('span', { title: unreadableWhy || '分母为 0：这个数不可解读', style: tinyBadge('var(--d-purple)') }, '不可解读') : null,
+              small ? React.createElement('span', { title: '样本量 <5', style: tinyBadge('var(--d-gray)') }, '小样本') : null,
+              unreadable ? React.createElement('span', { title: unreadableWhy || '分母为 0：这个数不可解读', style: tinyBadge('var(--d-gray)') }, '不可解读') : null,
               StrengthBadge(strength),
             ),
             React.createElement('span', { style: { color: warn ? T.warn : (unreadable ? T.text2 : T.text), fontWeight: 600, textAlign: 'right', wordBreak: 'break-word' } }, value),
@@ -2058,7 +2058,7 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
         // 徽章走统一形态（tinyBadge → --d-* 深档），亮/暗两套主题自动跟
         kbTag = s.activeCaseInKb
           ? React.createElement('span', { title: '该 case 已在 knowledge/ 中', style: tinyBadge('var(--d-green)') }, '库中已有')
-          : React.createElement('span', { title: '该 case 未入库（新形态待沉淀）', style: tinyBadge('var(--d-amber)') }, '新形态')
+          : React.createElement('span', { title: '该 case 未入库（新形态待沉淀）', style: tinyBadge('var(--d-purple)') }, '新形态')
       }
 
       // 状态左条：**扫列表时先看这一列**（进行中/已转上游=要跟；已定位=可放过）
@@ -2130,14 +2130,17 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
       // 拆到卡头下方与卡体深处两处，读者接不上各自的入口（旧版就是这么散的）。
       const docRow = (reportPath || s.sedimentCandidates)
         ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+            // 两个入口的词必须不同：一个在面板里读（TL;DR / 依据链 / 一键复制全文），
+            // 一个交给系统应用打开那份 .md 文件。旧版写作「看报告」与「打开报告」，
+            // 四个字里只差两个，实测被读成同一个动作。
             reportPath ? React.createElement('button', {
               type: 'button', onClick: toggleReport, title: '在面板里读报告：TL;DR / 依据链 / 修复方案，可一键复制全文',
               style: { background: reportOpen ? 'color-mix(in srgb, ' + T.brand + ' 10%, transparent)' : 'transparent', border: '1px solid ' + T.border, color: T.text, borderRadius: 'var(--r-pill)', padding: '2px 11px', fontSize: 'var(--t-tiny)', fontWeight: 600, cursor: 'pointer' },
-            }, reportOpen ? '收起报告' : '看报告') : null,
+            }, reportOpen ? '收起正文' : '读正文') : null,
             reportPath ? React.createElement('button', {
-              type: 'button', onClick: () => openFile(reportPath), title: reportPath,
+              type: 'button', onClick: () => openFile(reportPath), title: '交给系统默认应用打开这份文件：' + reportPath,
               style: { background: 'transparent', border: '1px solid ' + T.brand, color: T.brand, borderRadius: 'var(--r-pill)', padding: '2px 11px', fontSize: 'var(--t-tiny)', fontWeight: 600, cursor: 'pointer' },
-            }, opening === reportPath ? '打开中…' : '打开报告') : null,
+            }, opening === reportPath ? '打开中…' : '用系统应用打开') : null,
             // 入口是**靠同名规则**找到的（trace 里没记 `report_file`）就说出来：报告明明落在
             // traces/ 里而卡片上什么都不给，读者只会以为"面板读不到报告"（实测反馈）。
             s.reportSource === 'name' ? React.createElement('span', { title: 'trace 里没有 report_file；这份报告是按 <trace 同名>.report.md 的规则找的', style: { color: T.text2, fontSize: 'var(--t-tiny)' } },
@@ -2495,7 +2498,13 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
           [64, 84, 74, 84, 78, 78].map((w, i) => React.createElement('span', { key: i, className: 'sleu-skel', style: { width: w, height: 26 } }))),
         [0, 1, 2, 3].map(i => React.createElement('div', { key: 'r' + i, className: 'sleu-skel', style: { height: 46, marginBottom: 8 } })))
       const r = state.data
-      if (!r || !r.ok) return React.createElement('div', { style: { ...base, padding: 16, color: T.error } }, '无法读取 traces/: ' + (r && r.error || '未知错误'))
+      if (!r || !r.ok) {
+        // 与诊断记录面板同一个句式：缺什么 + 下一步。旧版只有一行裸红字（`无法读取 traces/: …`），
+        // 读者既不知道"这一层只读 traces/"也不知道该跑什么命令。
+        return React.createElement('div', { className: 'sleu-ledger-empty', style: { ...base, color: T.error } },
+          '读不到诊断记录：' + String((r && r.error) || '未知错误')
+          + '。这一层只读 traces/；目录不在时先在仓库里跑一次诊断（/skill:diagnose）后刷新。')
+      }
 
       let sessions = r.sessions || []
       // 待跟进**三类互斥**（此前重复计数：`status: in_progress` 的定义含"结论已给但用户在跟进"，
