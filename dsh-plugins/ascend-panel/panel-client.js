@@ -158,6 +158,14 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
 .sleu-fold-compact .sleu-fold-body{padding:6px 0 0}
 .sleu-fold-body>div:first-child>.sleu-block:first-child,.sleu-fold-body>.sleu{margin-top:0}
 @media (prefers-reduced-motion: reduce){.sleu,.sleu *{animation-duration:.001ms !important;animation-delay:0ms !important;transition-duration:.001ms !important}}
+/* 会话行的「待回报」标记（L2 行首空心点 + L1 悬停卡一行）。
+   为什么是空心点：侧栏自己的状态点是实心（运行中/完成/未读），空心与它区分开——这是
+   "欠账"，不是"会话在跑"。颜色用 amber（需处理，不是错误）。 */
+.sleu-row-dot{display:inline-block;width:6px;height:6px;border-radius:999px;border:1.4px solid var(--acc-amber);box-sizing:border-box;vertical-align:middle}
+/* 悬停卡很窄：标题一行（欠多久）、细节一行（自哪天 + 等什么），超长换行不截字 */
+.sleu-hover-mark{display:flex;flex-direction:column;gap:1px;margin-top:3px;font-size:var(--t-sm);line-height:var(--lh-base)}
+.sleu-hover-title{color:var(--c-amber);font-weight:600}
+.sleu-hover-detail{color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
 `
     const tokenSheet = styles.insert(PANEL_CSS)
 
@@ -3728,13 +3736,128 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
     }
 
 
+    // ── 会话行的「待回报」标记：L2 行首空心点 + L1 悬停卡一行 ──────────────────────
+    //
+    // 数据只有一条瘦 RPC（`ascend-session-marks`）：哪几个会话欠回报、欠了多久、命中哪个 case。
+    // 侧栏每行都渲染这两个组件，所以取数**必须共享**：模块级一份状态 + 一处在途请求，
+    // N 行只读同一次结果。逐行发请求会把 RPC 打成筛子（几百行），这是设计约束不是优化。
+    //
+    // 刷新：首次挂载取一次，30 秒内复用（与面板的复用窗口同一量级）；过期后下一次挂载再取。
+    // 取不到时**保留上一次结果**：清空会把"读不到"显示成"没有欠账"。
+    const MARK_TTL_MS = 30000
+    const markState = { at: 0, marks: Object.create(null) }
+    const markWaiters = new Set()
+    let markRequest = null
+
+    function refreshMarks(force) {
+      const fresh = !force && markState.at > 0 && (Date.now() - markState.at) < MARK_TTL_MS
+      if (fresh) return Promise.resolve()
+      if (markRequest !== null) return markRequest
+      markRequest = host.call('ascend-session-marks', {})
+        .then((r) => {
+          if (r && r.ok && Array.isArray(r.marks)) {
+            const next = Object.create(null)
+            for (const m of r.marks) if (m && m.sessionId) next[String(m.sessionId)] = m
+            markState.marks = next
+          }
+          markState.at = Date.now()
+          for (const fn of markWaiters) { try { fn() } catch (e) { /* 一个订阅者失败不阻塞其余 */ } }
+          markWaiters.clear()
+        })
+        .catch(() => {
+          markState.at = Date.now()
+          markWaiters.clear()
+        })
+        .then(() => { markRequest = null })
+      return markRequest
+    }
+
+    // 一行一个订阅：挂载时同步读共享状态，取数回来后由 markWaiters 通知重渲染。
+    // 没有全局定时器（动态沙箱不提供），所以刷新只发生在挂载与明确调用处。
+    function useTraceMark(sessionId) {
+      const [mark, setMark] = React.useState(null)
+      React.useEffect(() => {
+        let alive = true
+        const sync = () => { if (alive) setMark(markState.marks[String(sessionId)] || null) }
+        markWaiters.add(sync)
+        sync()
+        refreshMarks(false)
+        return () => { alive = false; markWaiters.delete(sync) }
+      }, [sessionId])
+      return mark
+    }
+
+    // 欠账的三个片段。悬停卡很窄（侧栏 280px 里的一张卡），所以这里不用一整句：
+    // 标题给"欠多久"，第二行给"从哪天起 + 等什么"，各一行；超出由 CSS 换行，不截字。
+    // `since` 是 skill 写进 trace 的 `feedback_pending_since`——按 updatedAt 猜会把"最近动过这一单"
+    // 读成"刚欠下"，所以缺它时如实写"起算日未记录"，不拿别的日期顶。
+    function markBits(mark) {
+      if (!mark) return null
+      const t = mark.since ? new Date(mark.since).getTime() : NaN
+      const valid = !isNaN(t)
+      let debt = '欠账天数未记录'
+      let since = '起算日未记录'
+      if (valid) {
+        const d = new Date(t)
+        const p = n => String(n).padStart(2, '0')
+        debt = '欠 ' + Math.max(0, Math.floor((Date.now() - t) / 86400000)) + ' 天'
+        since = '自 ' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+      }
+      const hit = mark.kind === 'case' && mark.caseId ? '命中 ' + mark.caseId : '未命中 case'
+      return { debt: debt, since: since, hit: hit }
+    }
+
+    // L1：悬停卡里的两行（悬停 800ms 后出现；侧栏自己的卡已有标题与时间，这里只加欠账）
+    function TraceRowHover(props) {
+      const mark = useTraceMark(props && props.sessionId)
+      if (!mark) return null
+      const bits = markBits(mark)
+      return React.createElement('div', { className: 'sleu-hover-mark' },
+        React.createElement('div', { className: 'sleu-hover-title' }, '待回报 · ' + bits.debt),
+        React.createElement('div', { className: 'sleu-hover-detail' }, bits.since + ' · ' + bits.hit),
+      )
+    }
+
+    // L2：行首空心点。DSH 只在"空闲且已读"的行渲染这个位置（运行中/未读先让给它的状态点），
+    // 所以这是尽力而为的标记，不是每行都有的徽标。
+    function TraceRowLeading(props) {
+      const mark = useTraceMark(props && props.sessionId)
+      if (!mark) return null
+      const bits = markBits(mark)
+      const label = '待回报 · ' + bits.debt + ' · ' + bits.since + ' · ' + bits.hit
+      return React.createElement('span', {
+        className: 'sleu-row-dot',
+        role: 'img',
+        'aria-label': label,
+        title: label,
+      })
+    }
+
+    // 会话 tab 只留「诊断」：它读的是这一单的轨迹。
     slots.inject('conversation.view', () => slots.register(
       { name: 'conversation.view', id: 'ascend-diagnose', order: 20, label: '诊断' },
       (props) => React.createElement(TraceView, props),
     ))
-    slots.inject('conversation.view', () => slots.register(
-      { name: 'conversation.view', id: 'ascend-metrics', order: 21, label: '指标' },
-      (props) => React.createElement(MetricsView, props),
+    // 指标读的是全库（metrics/ 与判据），与当前会话无关，所以常驻包把它交给整页「Ascend Sleuth」
+    // （dsh-plugins/sleuth-console）：没有会话也能打开，会话里不再多一个只显示全库数据的 tab。
+    // 动态热加载路径没有整页容器（SLEUTH_VIEWS 不存在），退回原来的 conversation.view tab。
+    if (typeof SLEUTH_VIEWS !== 'undefined' && SLEUTH_VIEWS !== null) {
+      SLEUTH_VIEWS.metrics = (props) => React.createElement(MetricsView, props)
+    } else {
+      slots.inject('conversation.view', () => slots.register(
+        { name: 'conversation.view', id: 'ascend-metrics', order: 21, label: '指标' },
+        (props) => React.createElement(MetricsView, props),
+      ))
+    }
+
+    // 侧栏两个座位：行首小点（只在空闲已读的行出现）与悬停卡一行。都只读。
+    slots.inject('sidebar.session.row.leading', () => slots.register(
+      { name: 'sidebar.session.row.leading', id: 'ascend-pending' },
+      (props) => React.createElement(TraceRowLeading, props),
+    ))
+    slots.inject('sidebar.session.row.hover', () => slots.register(
+      { name: 'sidebar.session.row.hover', id: 'ascend-pending' },
+      (props) => React.createElement(TraceRowHover, props),
     ))
   },
 }

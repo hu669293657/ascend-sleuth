@@ -18,9 +18,9 @@
 | 响应式 | 面板跑在可变宽度的 tab 里：按**容器宽度**降级（容器查询），窄时收列、展开态单列；不假设全宽、也不让整页横向滚动 | 人审（渲染检查只断言容器查询存在） |
 | 只读边界 | 面板是只读可视化 + 指令生成器；不做决策与写入 | 人审（`skills/preload-panel/SKILL.md`） |
 | 依赖缺失时的退化 | 拿不到数据时给一行说明 + 可行的下一步，不占位、不拿别处的数据冒充 | `node scripts/panel_render_check.js`（退化路径一节，含 5 个缺件用例） |
-| 面板包产物 | 面板源码（`dsh-plugins/<面板>/panel-host.js`、`panel-client.js`）是唯一真源，`dsh-plugins/dsh-sleuth-panels/lib/` 是生成物 | `node scripts/build_panel_bundle.js --check` |
+| 面板包产物 | 面板源码（`dsh-plugins/<面板>/panel-host.js`、`panel-client.js`，以及整页的 `dsh-plugins/sleuth-console/console-client.js`）是唯一真源，`dsh-plugins/dsh-sleuth-panels/lib/` 是生成物 | `node scripts/build_panel_bundle.js --check` |
 | 面板包版本 | `package.json` 的 `version` 是安装器的判新旧依据：**改源码后必须递增，并重跑生成器**（版本号在构建时注入 `lib/client.js` 的 `PANEL_VERSION`，只改一处会不一致）。不递增，`panel_install` 会判"已是最新"不换装（实测踩过）；忘了 bump 时用 `--force` 强制换装 | 人审（`--check` 看不出内容是否变了） |
-| 面板包可加载性 | 常驻插件包适配层的 host 四样（`harness.handle` → prefix 路由、信封格式、`harness.defineTool` 的 parameters 归一化、`shell.run` → `execute` + `result()`）+ client 的 `host.call` 映射（渲染三个 tab 的首屏各验一条 RPC）+ 三处名字对齐（`package.json` / `cordis.patch.yml` / 产物 export） | `node scripts/check_panel_bundle.js` |
+| 面板包可加载性 | 常驻插件包适配层的 host 四样（`harness.handle` → prefix 路由、信封格式、`harness.defineTool` 的 parameters 归一化、`shell.run` → `execute` + `result()`）+ client 的 `host.call` 映射（诊断 tab、Ascend Sleuth的指标子页、自演进子页各验一条 RPC）+ 三个注册面的 id 对齐（`conversation.view` / `main` 的 key / `sidebar.panellist` 的 id）+ 三处名字对齐（`package.json` / `cordis.patch.yml` / 产物 export） | `node scripts/check_panel_bundle.js` |
 | 面板包外部契约 | 已安装 DSH 的五条接缝：`webServer.register(route)` 含 prefix、`connection.requestRejection`、client 沙箱的 `styles.insert`、页面产物格式 `__ModuleLoader__.load`、shell 的 `resolve` + `execute` | 同上（末段 DSH 探针；`--selftest-dsh` 自测） |
 
 **结果复用窗口**（两个面板同一条约定）：面板取数要起 Python 子进程，而切走 tab 再切回会重新挂载
@@ -29,6 +29,25 @@
 ③**失败结果同样按窗口复用、但同样能被强制重跑**（把"体检不可用"缓存住又不给重试，读者只能干等过期）。
 窗口数值只写在 host（机器落点），client 的说明与本节都以它为准；数值漂了由机械检查拦下。
 复用不等于实时：界面上的时间戳照旧是脚本生成时刻，不会因为复用被刷成"现在"。
+
+## 两块界面：会话里一个 tab，全库读数在整页「Ascend Sleuth」
+
+**会话里只留「诊断」一个 tab**（`conversation.view` id `ascend-diagnose`）：它读这一单的轨迹、证据与成本，属于会话。
+
+**指标与自演进读的是全库**（`metrics/`、`proposals/`、`knowledge/`），与当前会话无关，所以常驻包里它们搬到
+整页「Ascend Sleuth」（`sleuth-console/`）：`main` 的 keyed 条目 `ascend-sleuth-console` + 侧栏图标
+（`sidebar.panellist` 同一个 id）。没有会话也能打开；每个会话不再各记一份"停在哪个全局页"。
+
+三个源文件共用一张视图登记表 `SLEUTH_VIEWS`（生成器在包里建）：两个面板 apply 时把视图写进去，整页按
+id 取来渲染。**动态热加载路径没有这个对象**，面板因此退回三个 `conversation.view` tab（该路径保持旧形态，
+见 `skills/preload-panel/SKILL.md`）。
+
+**侧栏还有一处：会话行的「待回报」标记**。它读 `traces/` 里的 `feedback.outcome: pending`，只标欠回报的
+会话；没有轨迹的会话（普通问答、其他 skill）不显示，这是设计。**行号按轨迹的 `harness_session` 匹配**
+（轨迹自己的 `session_id` 是诊断名，与侧栏会话号是两套）；没写这一项的轨迹定位不到行，因此不标。
+两个座位：行首空心点（DSH 只在空闲且已读的行渲染这个位置，运行中/未读会让位给它的状态点）与悬停卡
+一行（欠几天、命中哪个 case）。数据来自一条瘦 RPC `ascend-session-marks`，侧栏所有行共用一次取数
+（30 秒窗口），不逐行发请求。
 
 ## 目录里还有第三个包：vllm-kb（不是面板）
 
@@ -61,8 +80,9 @@ B、C、D 三条路用的是同一个插件管理器，差别只在谁去调它�
   `owner.webServer` 就会抛（in-app 的 dsh-ppt 也把这一步包在 try/catch 里，真正干活的是它自己注册的路由）。
 - `host.call` → 调同一个 channel；失败抛错（面板各处的 `.catch` 就是照这个写的）。
   它只在组件挂载时才发生，所以靠**渲染**来验：`check_panel_bundle.js` 用 mock React（effect 同步跑、
-  `createElement` 递归调用函数组件）把三个 tab 的首屏各渲染一次，断言它们分别真的发出了
-  `ascend-traces-list` / `ascend-metrics-verdict` / `ev-board-load`，且渲染期无异常；真机那一次
+  `createElement` 递归调用函数组件）把三个界面的首屏各渲染一次——诊断 tab、Ascend Sleuth的指标子页（按
+  `props.view` 选）、自演进子页——断言它们分别真的发出了 `ascend-traces-list` /
+  `ascend-metrics-verdict` / `ev-board-load`，且渲染期无异常；真机那一次
   仍归 `panel_rpc_probe.js`（同一条线协议）。
 - `styles.insert` → 自建 style 标签（client 沙箱给每个包注入的那个）。
 - `harness.defineTool` 的 `parameters` → dsh 自带的 `defineTool` 只认 DSL

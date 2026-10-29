@@ -80,6 +80,18 @@ return {
       if (!sandboxPolicySvc || typeof sandboxPolicySvc.resolve !== 'function') return undefined
       let session = null
       try { session = sessions && sessionId ? sessions.get(sessionId) : null } catch (e) { session = null }
+      // 无会话（整页面板）时用"第一个带 cwd 的会话"的档位：不传 session 会落到部署默认
+      //（workspace-write + launch-root），在受限令牌 runner 上子进程起不来，界面只剩
+      //「找不到 Python」——解释器在，是沙箱把进程挡在启动之前（实测：0xC0000142）。
+      if (session === null && sessions && typeof sessions.list === 'function') {
+        try {
+          for (const s of sessions.list() || []) {
+            if (s && s.header && s.header.cwd) { session = s; break }
+          }
+        } catch (e) {
+          session = null
+        }
+      }
       try {
         const policy = session ? sandboxPolicySvc.resolve({ session: session }) : sandboxPolicySvc.resolve()
         if (policy && typeof policy.mode === 'string') return policy
@@ -405,11 +417,12 @@ return {
     // 缓存是派生物：读不到/损坏/版本不一致就整份重建，删掉也不影响正确性。
     // 存量不需要迁移——第一次刷新全量解析一遍并写缓存，之后都是增量。
     const INDEX_CACHE_FILE = '.panel-index.json'
-    const INDEX_SCHEMA = 4   // v4: 列表成本带 scope（窗口内 / 旧格式只有会话累计）；v3: severity 与 fixEmitted（v2 加了 caseCandidates）
+    const INDEX_SCHEMA = 6   // v6: 列表带 harnessSession（侧栏行按它匹配）；v5: feedbackPendingSince；v4: 成本带 scope；v3: severity 与 fixEmitted
     // 改 `buildCoreItem` 的字段必须同步这份清单：形状不符的缓存条目会被丢弃并重解析，
     // 避免"旧缓存把新字段喂成 undefined"在列表上静默少一列。
     const INDEX_CORE_FIELDS = ['sessionId', 'file', 'status', 'framework', 'platform', 'category', 'activeCase',
       'summarySnippet', 'excludedCount', 'feedbackPending', 'feedback', 'feedbackKind', 'feedbackCase',
+      'feedbackPendingSince', 'harnessSession',
       'waitingFor', 'userSteps', 'agentSteps', 'lastAction', 'lastRole', 'lastOutput', 'createdAt', 'updatedAt',
       'recordedReport', 'activeCaseKind', 'sedimented', 'sedimentCandidates', 'caseCandidates',
       'severity', 'fixEmitted', 'parseAnomaly']
@@ -535,6 +548,13 @@ return {
           const cs = (fb && typeof fb === 'object' && fb.case) ? String(fb.case) : ''
           return (cs && cs !== 'pending-investigation') ? cs : null
         })(),
+        // 待回报从哪天起算（skill 写进 trace 的 `feedback_pending_since`）。侧栏的行首标记
+        // 用它写「自 09-12（4 天）」——按 updatedAt 猜会把"最近动过这一单"读成"刚欠下"。
+        feedbackPendingSince: doc.feedback_pending_since ? String(doc.feedback_pending_since) : '',
+        // harness 侧会话号（DSH 里是 `$DSH_SESSION_ID`）。**侧栏行按它匹配**：轨迹自己的
+        // `session_id` 是诊断起的名字（形如 `<日期>-<issue>-<短名>`），与侧栏的会话号是两套，
+        // 拿它匹配永远落空。轨迹没写这一项时无法定位到侧栏的行——少这一条标记，不猜。
+        harnessSession: doc.harness_session ? String(doc.harness_session) : '',
         waitingFor: (function () {
           for (let i = trace.length - 1; i >= 0; i--) {
             const ev = trace[i] && trace[i].evidence
@@ -2596,6 +2616,32 @@ return {
       return loadMetricsVerdict(cwd, !!(args && args.refresh === true), readPolicy(sessionId))
     })
 
+    // 会话行的「待回报」标记：只返回有欠账的会话，给侧栏的行首小点与悬停卡用。
+    // 为什么单开一条瘦 RPC 而不是让侧栏复用 ascend-traces-list：列表会给每行都带
+    // summarySnippet 等大字段，而侧栏要的只是"哪几个会话欠回报 + 欠了多久"。
+    // 解析走同一份缓存（listTraces 的条目缓存），所以多这一条不会多读一遍文件。
+    const marksDisposer = harness.handle('ascend-session-marks', async () => {
+      if (!fs) return needFs()
+      // 侧栏标记是全局的（没有会话上下文）：轨迹读主检出那一侧。
+      const cwd = await resolveCwd(null)
+      const repoCwd = await resolveRepoCwd(null)
+      const r = await listTraces(cwd, repoCwd)
+      if (!r.ok) return { ok: false, error: r.error }
+      const marks = []
+      for (const s of r.sessions || []) {
+        // 侧栏的行号是 harness 会话号；轨迹自己的 session_id 是诊断名，两套不能混用。
+        // 没写 harness_session 的轨迹定位不到任何一行——跳过，不猜。
+        if (!s || !s.feedbackPending || !s.harnessSession) continue
+        marks.push({
+          sessionId: s.harnessSession,
+          kind: s.feedbackKind === 'case' ? 'case' : 'no-case',
+          caseId: s.feedbackCase || null,
+          since: s.feedbackPendingSince || s.updatedAt || s.createdAt || null,
+        })
+      }
+      return { ok: true, marks }
+    })
+
     // 导出交接包（跨机继续定位）。与 open-evidence 一样只依赖 shell，不需要 fs 服务。
     const exportDisposer = harness.handle('ascend-export-trace', async (args) => {
       const sessionId = args && args.sessionId ? String(args.sessionId) : null
@@ -2617,6 +2663,7 @@ return {
       if (healthDisposer) healthDisposer()
       if (processDisposer) processDisposer()
       if (verdictDisposer) verdictDisposer()
+      if (marksDisposer) marksDisposer()
       if (exportDisposer) exportDisposer()
     }
   },

@@ -5,15 +5,17 @@ description: >
   自带的东西选装载路：有 cordis_define / cordis_run 在会话内热加载；有 plugin_manager 就装常驻插件
   包；DSH Desktop 用安装目录自带的 dsh 命令行把 dsh-plugins/dsh-sleuth-panels/ 装进 profile（拿不到
   地址与 token 时这是主路）；另有 scripts/panel_install.js --all 经 /api 通路一次装面板与 vllm-kb
-  两个包、以及在侧栏「插件」页粘贴路径两条备用路。面板：ascend-panel →「诊断」「指标」两个 tab；
-  ev-panel →「自演进」tab。仅 DSH 可用
-  ——依赖 conversation.view 插槽；其他 agent（Claude Code / Codex / pi）无此机制。
+  两个包、以及在侧栏「插件」页粘贴路径两条备用路。常驻包里的界面是两块：会话里一个「诊断」tab，
+  左侧栏一个「Ascend Sleuth」整页（指标 / 自演进）；热加载路径没有整页容器，仍是三个 tab
+  （诊断 / 指标 / 自演进）。仅 DSH 可用
+  ——依赖 conversation.view / main / sidebar.panellist 插槽；其他 agent（Claude Code / Codex / pi）无此机制。
 ---
 
 # Preload Panel
 
-DSH 会话中加载可视化面板（诊断 / 指标 / 自演进）。每个面板占 conversation.view 一个 tab
-（list 插槽，按 order 排列，可共存）。
+DSH 会话中加载可视化面板。常驻包把界面分成两块：会话里一个「诊断」tab（`conversation.view`，读这一单），
+全库读数在整页「Ascend Sleuth」（`main` 的 keyed 条目 + `sidebar.panellist` 图标，指标 / 自演进两个子页）。
+热加载路径没有整页容器，退回三个 `conversation.view` tab。
 
 面板代码只有一份：`dsh-plugins/<面板>/panel-host.js` 与 `panel-client.js`（动态插件方言的函数体）。
 装法有五条，先按「第 0 步」判本机走哪条。除热加载外，装完都要**重启宿主进程**：host 半的接口路由
@@ -67,9 +69,9 @@ DSH 会话中加载可视化面板（诊断 / 指标 / 自演进）。每个面�
    返回 awaiting-approval 时告知用户在 UI 允许（Client 半需授权）；授权后 tab 出现。
    两个文件合计约 84 KB（ev-panel）与 265 KB（ascend-panel），发路径即可，别把全文重新输出一遍。
 
-3. **验证**：确认插件 running 且无 waitingFor；tab 出现在对话视图（按「面板清单」的 id 核对）。
-   自演进看板首次打开会调 `scripts/ev_board_data.py` 汇总数据，确认数据区渲染。
-
+3. **验证**：确认插件 running 且无 waitingFor；对话视图出现对应 tab（热加载路径没有整页「Ascend Sleuth」，
+   按「面板清单」热加载那两行的 id 核对）。自演进看板首次打开会调 `scripts/ev_board_data.py` 汇总数据，
+   确认数据区渲染。
 改完面板代码再调一次同一条 `panel_from_file` 即重载（同 `idPrefix` 复用本会话的插件，
 返回 `reused: true`，不会堆出重复 tab）。
 
@@ -78,8 +80,8 @@ DSH 会话中加载可视化面板（诊断 / 指标 / 自演进）。每个面�
 1. **确认包与产物存在**：`dsh-plugins/dsh-sleuth-panels/`，含 `package.json`、`cordis.patch.yml`、
    `lib/index.js`、`lib/client.js`。两个 `lib/` 文件是生成物：面板源码改了就跑
    `node scripts/build_panel_bundle.js`，用 `node scripts/build_panel_bundle.js --check` 核对产物与
-   源文件一致，`node scripts/check_panel_bundle.js` 做一次可加载性冒烟（路由、端点、工具、三个 tab、
-   样式标签、卸载），并核对三处名字对齐（`package.json` / `cordis.patch.yml` / 产物 export）。
+   源文件一致，`node scripts/check_panel_bundle.js` 做一次可加载性冒烟（路由、端点、工具、一个 tab +
+   整页 + 侧栏图标三个注册面、样式标签、卸载），并核对三处名字对齐（`package.json` / `cordis.patch.yml` / 产物 export）。
    **不要手改 `lib/`**。同一条命令还会判本机 DSH 走哪条装载路，并核对常驻包依赖的五个外部契约
    （`webServer` 的 prefix 路由声明、`connection.requestRejection`、client 沙箱的 `styles.insert`、
    页面产物格式 `__ModuleLoader__.load`、shell 的 `resolve` + `execute`）还在不在——**装之前跑它**。
@@ -96,8 +98,9 @@ DSH 会话中加载可视化面板（诊断 / 指标 / 自演进）。每个面�
    - `failed` → 读诊断；`webServer` 一类的报错说明路由没注册成功。
 
 4. **验证**：先跑 `node scripts/panel_rpc_probe.js`（退出码 2 = 拿不到地址，或路由没在服务／未授权）；
-   再用 `cordis_inspect_query`（client, `Slots`, `listSubTree`, root `conversation.view`）看三个 tab id
-   是否在占位列表里。插槽占位与 RPC 都通了也不等于看着对，最后请用户点开一页确认渲染。
+   再用 `cordis_inspect_query`（client, `Slots`, `listSubTree`, root 下三处）看注册是否在占位列表里：
+   `conversation.view` 的 `ascend-diagnose`、`main` 的 key `ascend-sleuth-console`、`sidebar.panellist` 的同一个 id。
+   插槽占位与 RPC 都通了也不等于看着对，最后请用户点开一页确认渲染。
 
 5. **卸载**：`plugin_manager remove_bundle(target: 'dsh-sleuth-panels')`。
 
@@ -238,10 +241,28 @@ DSH 会话中加载可视化面板（诊断 / 指标 / 自演进）。每个面�
 
 ## 面板清单
 
-| 面板 | 目录 | tab id / label | 视图 |
+**常驻包（`dsh-sleuth-panels`）**：会话里一个 tab，全库读数在整页「Ascend Sleuth」。
+
+| 界面 | 目录 | 注册点 | 视图 |
 |---|---|---|---|
-| 诊断面板 | `dsh-plugins/ascend-panel/` | `ascend-diagnose`(20) / `ascend-metrics`(21) | 会话列表/轨迹/证据 + 指标闭环判决（判据→结论/证据/下一步）/容量逐格/趋势 |
-| 自演进看板 | `dsh-plugins/ev-panel/` | `ascend-evolve`(22) | 首屏是体检判决（要处理的判据 + 下一步动作）与触及面；卡收在默认收起的抽屉里作为 diff 日志 |
+| 诊断 tab | `dsh-plugins/ascend-panel/` | `conversation.view` id `ascend-diagnose`(20) | 会话列表/轨迹/证据 |
+| Ascend Sleuth · 指标 | `dsh-plugins/ascend-panel/` | 视图登记表 `SLEUTH_VIEWS.metrics`，整页按 id 取 | 指标闭环判决（判据→结论/证据/下一步）/容量逐格/趋势 |
+| Ascend Sleuth · 自演进 | `dsh-plugins/ev-panel/` | 视图登记表 `SLEUTH_VIEWS.evolve`，整页按 id 取 | 首屏是体检判决（要处理的判据 + 下一步动作）与触及面 |
+| Ascend Sleuth 外壳 | `dsh-plugins/sleuth-console/` | `main` key `ascend-sleuth-console` + `sidebar.panellist` 同 id | 两个子页的切换与侧栏图标（`icon.svg`） |
+
+侧栏另有**会话行的「待回报」标记**（`sidebar.session.row.leading` / `.hover`，同一个 id）：只标
+`traces/` 里 `feedback.outcome: pending` 的会话，没有轨迹的会话不显示。**按轨迹的
+`harness_session` 匹配侧栏行**（轨迹的 `session_id` 是诊断名，两套 id 不通）；没写这一项的轨迹
+标不出来。行首小点只在空闲且已读的行渲染（运行中/未读让位给 DSH 自己的状态点），悬停卡里有一行
+欠账说明。数据走瘦 RPC `ascend-session-marks`，所有行共用一次取数。
+
+**热加载（逐面板）**：没有整页容器，三个视图各占一个 `conversation.view` tab。
+
+| 面板 | 目录 | tab id / label |
+|---|---|---|
+| 诊断 | `dsh-plugins/ascend-panel/` | `ascend-diagnose`(20) / 诊断 |
+| 指标 | `dsh-plugins/ascend-panel/` | `ascend-metrics`(21) / 指标 |
+| 自演进 | `dsh-plugins/ev-panel/` | `ascend-evolve`(22) / 自演进 |
 
 ## 非面板包：vllm-kb 接入插件
 
@@ -273,7 +294,7 @@ dsh.cmd plugin --profile desktop add "<仓库绝对路径>/dsh-plugins/dsh-sleut
 
   失败就告诉用户"自演进看板需要 PyYAML，请 `pip install pyyaml`"，再决定是否仍加载。
 - **诊断面板**：`traces/` 可能不存在（gitignored、按需生成），host 把"目录不存在"当空态处理；
-  用户预期有历史诊断却显示为空时，提示运行 `/skill:diagnose` 生成 `traces/`。指标 tab 需要 Python 3
+  用户预期有历史诊断却显示为空时，提示运行 `/skill:diagnose` 生成 `traces/`。Ascend Sleuth的指标子页需要 Python 3
   + PyYAML：「闭环判决」跑 `scripts/metrics_health.py --json`（判据读 `metrics/gates.yaml`），
   「实时计算」跑 `scripts/trace_metrics.py`；缺依赖时面板显示「体检不可用」并给出可执行提示，
   所以预检失败仍可加载，只是首屏没有判决条。

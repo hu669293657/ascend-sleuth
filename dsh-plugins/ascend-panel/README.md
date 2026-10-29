@@ -1,9 +1,11 @@
 # ascend-sleuth 诊断面板（DSH 插件）
 
-诊断可视化操作台，对话视图提供两个 tab：
+诊断可视化操作台。**常驻包里**对话视图只留「诊断」tab，指标挂在整页「Ascend Sleuth」（`dsh-plugins/sleuth-console/`，
+与自演进同一个入口）——它读的是全库读数，与当前会话无关。**动态热加载路径**没有整页容器，仍退回
+`conversation.view` 的两个 tab（诊断 / 指标）。
 
 - **诊断**：会话列表（状态/时间/搜索/过滤）→ 展开轨迹（summary/evidence/reason/reference）→ 证据文件打开
-- **指标**：**累计读数**（覆盖 / 不可解读 / 需处理 / 条目使用 / 长期零选中 / 过程动作成本 / 变差的读数 / 本期该做）→ **闭环判决**（首屏只列要处理的判据：结论 → 证据 → 下一步 + 可复制指令）→ 状态条（快照新鲜度 + 判据覆盖面 + 索引/磁盘 drift）→ 闭环检验（判据全貌，折叠）→ 容量台账（**逐格** + 历史趋势条）→ 存量体检 → 趋势差分 → timeline 快照 → 实时计算
+- **指标**（Ascend Sleuth子页）：**累计读数**（覆盖 / 不可解读 / 需处理 / 条目使用 / 长期零选中 / 过程动作成本 / 变差的读数 / 本期该做）→ **闭环判决**（首屏只列要处理的判据：结论 → 证据 → 下一步 + 可复制指令）→ 状态条（快照新鲜度 + 判据覆盖面 + 索引/磁盘 drift）→ 闭环检验（判据全貌，折叠）→ 容量台账（**逐格** + 历史趋势条）→ 存量体检 → 趋势差分 → timeline 快照 → 实时计算
 
 ### 单次诊断的五块与累计读数（诊断观测数据面）
 
@@ -231,7 +233,7 @@ node scripts/panel_install.js --remove   # 卸载
 
 1. 侧栏「插件」页 → 添加入口 → 粘贴本仓库 `dsh-plugins/dsh-sleuth-panels` 的绝对路径（粘的是这个包目录，不是上面的面板源目录 `dsh-plugins/ascend-panel/`：后者没有 `package.json`，入口会拒）。该入口也接受包名、Git 地址与压缩包。
 2. 装完看 profile 里的四处记录：`package.json` 的 `dependencies` 与 `dsh.profile.bundles` 各一条 `dsh-sleuth-panels`；`dsh.desktop.generationProjection` 里一条 generationId，形如 `dsh-sleuth-panels+<版本>+<哈希>`；`pnpm.overrides` 里一条指向 `dirname($DSH_PROFILE_DIR)/.generations/live/<generationId>/node_modules/dsh-sleuth-panels` 的 link。界面不给模型可读的 application / warnings，以这四处记录为准。包进了 generation，仓库被移动或 worktree 被清掉都不影响已装的那份。
-3. 在仓库里跑 `node scripts/panel_rpc_probe.js`（退出码 2 = 拿不到地址，或路由没在服务或未授权），再刷新页面，对话视图的 tab 条里应出现「诊断」「指标」「自演进」三个 tab。
+3. 在仓库里跑 `node scripts/panel_rpc_probe.js`（退出码 2 = 拿不到地址，或路由没在服务或未授权），再刷新页面：对话视图的 tab 条里应出现「诊断」，左侧栏应出现「Ascend Sleuth」图标（指标 / 自演进在这一页里）。
 4. 卸载也在这个页面做。
 
 桌面版没有 `dsh` 命令，界面提示的 `dsh plugin --profile web install` 与 `dsh --profile web --dump-config` 都用不上。profile 的 `dependencies` 里若有指向没有 `package.json` 的目录的 link 依赖，桌面版启动的 generations 迁移会 defer，之后需要解析这个包的操作报 `cannot resolve profile bundle "<名字>"`；处置是把 `package.json`、`pnpm-lock.yaml`、`node_modules` 里的死链一起删干净。
@@ -296,13 +298,13 @@ node scripts/panel_install.js --remove   # 卸载
 | 沉淀 | 四状态呈现 + 沉淀指令 copy + 双标记操作（Tier2/Tier3 回写）。**case 与先验候选分家**：上段是本单 case 的沉淀状态（走 to-postmortem），下段是先验知识候选（走 to-reference，与 case 的沉淀状态互不影响）——case 沉淀不产出 reference 词条，混在一处会被读成"reference 也跟着沉淀了"（实测误读）。**「待沉淀」与「待升格」两种状态**：「已收尾 · 待沉淀」「有结论 · 待沉淀」（报告或沉淀候选已产出、但诊断还没标收尾）与「未闭环 · 待升格」在列表上有徽标、可筛选可搜索；前者按筛选结果一次生成批量沉淀命令，后者勾选后批量标已解决（只允许「已解决 · fix 生效」一种结局） |
 | 交接包 | 卡片的「导出交接包」直接产出 `traces/exports/` 下的 zip 与单文件 md（不是复制指令）；该目录不可写时脚本改道到检出内的 `.handoff/`，结果行写明本想去哪、实际落在哪、为什么。面板不改写这个事实，也不做脱敏（`含原始证据` 徽标只标注） |
 | 报告与沉淀入口 | 卡片给「看报告」（面板内读：章节跳转 + 只渲染所选一节 + 复制全文 + 打开文件）、「打开报告」（外部编辑器）与「沉淀建议 N 条」（trace `sediment_candidates` 条数，明细在展开后的沉淀区）；报告名认两种来源：trace 记录的 `report_file`（**顶层与 `report` 事件里都认**）与 `<trace 同名>.report.md` 规则；trace 里写成 `traces/…` 路径或带 `\` 的按 `traces/` 内相对名归一（否则会拼成 `traces/traces/…`），走同名规则时卡片上写明来源；面板只读，不改报告内容 |
-| 指标 tab · 闭环判决 | 首屏按 `metrics/gates.yaml` 的判据列出**要处理的**（✗/!），每条可展开取证据、`gates.yaml` 的动作原文与可复制指令；零越界时一行说明；**判决未返回时走中性态**（不说"无阻塞项"） |
-| 指标 tab · 状态条 | 最后核验快照的期号与龄期（含阈值）/ live·结构期数 / case·ref 总数 / 索引↔磁盘 drift |
-| 指标 tab · 容量台账 | **逐格**（framework × category）`85/30 2.8× 硬上限`，阈值读 `gates.yaml`，正常格折叠计数；每格带历史趋势条与净增量（`32→85 (+53)`） |
-| 指标 tab · 体检器失效 | 有判据没被评估时出红色横幅（判据 N/M + 缺口点名 + "没报越界 ≠ 没有越界" + 复现命令），**不显示**"闭环未见阻塞项" |
-| 指标 tab · 存量体检 | 知识库健康（case 总数/低置信/category 分布 + reference 草稿/过期/type）+ 流程闭环（沉淀漏斗/续接/参考参与） |
-| 指标 tab · 趋势与快照 | 本期 vs 上期差分（只列动了的）+ timeline 期卡（live 置顶、默认展开**最新两期**、小样本/不可解读标注）+ 实时计算 |
-| 指标 tab · 数据源三态 | timeline **读不到** / **解析不出期次** / 正常，三种结局分开说：中间那一种是"结构与解析器不符"，明确写"这不是没有数据"，并给复现命令 |
+| Ascend Sleuth · 指标 · 闭环判决 | 首屏按 `metrics/gates.yaml` 的判据列出**要处理的**（✗/!），每条可展开取证据、`gates.yaml` 的动作原文与可复制指令；零越界时一行说明；**判决未返回时走中性态**（不说"无阻塞项"） |
+| Ascend Sleuth · 指标 · 状态条 | 最后核验快照的期号与龄期（含阈值）/ live·结构期数 / case·ref 总数 / 索引↔磁盘 drift |
+| Ascend Sleuth · 指标 · 容量台账 | **逐格**（framework × category）`85/30 2.8× 硬上限`，阈值读 `gates.yaml`，正常格折叠计数；每格带历史趋势条与净增量（`32→85 (+53)`） |
+| Ascend Sleuth · 指标 · 体检器失效 | 有判据没被评估时出红色横幅（判据 N/M + 缺口点名 + "没报越界 ≠ 没有越界" + 复现命令），**不显示**"闭环未见阻塞项" |
+| Ascend Sleuth · 指标 · 存量体检 | 知识库健康（case 总数/低置信/category 分布 + reference 草稿/过期/type）+ 流程闭环（沉淀漏斗/续接/参考参与） |
+| Ascend Sleuth · 指标 · 趋势与快照 | 本期 vs 上期差分（只列动了的）+ timeline 期卡（live 置顶、默认展开**最新两期**、小样本/不可解读标注）+ 实时计算 |
+| Ascend Sleuth · 指标 · 数据源三态 | timeline **读不到** / **解析不出期次** / 正常，三种结局分开说：中间那一种是"结构与解析器不符"，明确写"这不是没有数据"，并给复现命令 |
 | 学习环提示 | 反馈债**按 `feedback.case` 的取值分型**：真实 case id → 「结果待回报：<case>」+ 回报指令；占位串 `pending-investigation`（没命中 case，只给了建议）与**空值/缺失**（写了 `outcome: pending` 却没填 `case`）→ 「等现场补材料：<等什么>」并归入「在查」——这两者都不是 case id，读成 case 会把它报成"有个 fix 等验证"，还会给一个不存在的 case 生成回报指令 |
 | 不可解读标记 | 分母为 0 的指标（误诊率/归因比）显示「不可解读」徽标而非 `0/N`；期卡头报该期有几项不可解读 |
 
