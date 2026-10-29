@@ -322,6 +322,12 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
 .sleu-ledger-sum{font-size:var(--t-sm);color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sleu-ledger-empty{padding:26px 16px;text-align:center;color:var(--dsw-alias-label-secondary);font-size:var(--t-md);line-height:var(--lh-prose)}
 .sleu-ledger-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 14px;border-top:1px solid var(--hair);font-size:var(--t-tiny);color:var(--dsw-alias-label-secondary)}
+.sleu-ledger-chips{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 14px;border-bottom:1px solid var(--hair)}
+.sleu-ledger-chip{padding:2px 10px;border-radius:var(--r-pill);border:1px solid var(--hair);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:var(--t-tiny);cursor:pointer;transition:background-color var(--m-fast) var(--e-out),border-color var(--m-fast) var(--e-out)}
+.sleu-ledger-chip:hover{background:var(--tint-blue)}
+.sleu-ledger-chip[aria-pressed='true']{border-color:var(--d-blue);color:var(--d-blue);background:var(--tint-blue);font-weight:600}
+.sleu-ledger-hint{margin-left:auto;color:var(--dsw-alias-label-secondary);font-size:var(--t-tiny);white-space:nowrap}
+.sleu-ledger-row.is-active{background:var(--tint-blue);box-shadow:inset 2px 0 0 var(--d-blue)}
 @media (prefers-reduced-motion: reduce){.sleu,.sleu *{animation-duration:.001ms !important;animation-delay:0ms !important;transition-duration:.001ms !important}}
 /* 会话行的「待回报」标记（L2 行首空心点 + L1 悬停卡一行）。
    为什么是空心点：侧栏自己的状态点是实心（运行中/完成/未读），空心与它区分开——这是
@@ -2216,7 +2222,13 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
       // 它是**切走**的动作（点了就离开面板），所以成功不需要回显；失败要说话——
       // 外来单（import_trace.py 接手的那批）在本机没有这个会话，静默会被读成"面板坏了"。
       const harnessSession = s.harnessSession ? String(s.harnessSession) : ''
-      const navBtn = harnessSession
+      const isCurrentSession = !!(harnessSession && props.currentSession && String(props.currentSession) === harnessSession)
+      const navBtn = isCurrentSession
+        ? React.createElement('span', {
+            title: '这一单就是你当前打开的会话——不必再跳',
+            style: { color: T.text2, fontSize: 'var(--t-tiny)', border: '1px dashed ' + T.border, borderRadius: 'var(--r-pill)', padding: '2px 10px' },
+          }, '当前会话')
+        : harnessSession
         ? React.createElement('button', {
             type: 'button', title: '切到这条诊断的会话（' + harnessSession + '）',
             onClick: () => {
@@ -2799,6 +2811,11 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
           : React.createElement('div', { className: 'sleu-list' },
               sessions.map(s => React.createElement(SessionCard, {
                 key: s.file, session: s, sessionId: sessionId,
+                // 当前会话号：卡片据此把「打开会话」换成「当前会话」，避免一个点了没反应的按钮。
+                currentSession: (function () {
+                  const sn = sessionListSnapshot()
+                  return sn && sn.current ? String(sn.current) : ''
+                })(),
                 selectable: kbFilter === 'need-promote',
                 selected: !!sel[s.file],
                 onToggleFile: toggleSel,
@@ -4116,14 +4133,46 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
       return '欠 ' + Math.max(0, Math.floor((Date.now() - t) / 86400000)) + ' 天'
     }
 
-    // 浮层本体。数据走与「诊断」tab 同一条 RPC（`ascend-traces-list`），排序也用同一份
-    // `valueRankOf`——两处各算一份就会漂移。这里是**只读 + 导航**：不写 trace、不生成指令，
-    // 指令仍然在「诊断」tab 里（那条纪律见 skills/preload-panel/SKILL.md 的只读边界）。
+    // 诊断记录面板（点侧栏底部「诊断记录」弹出来的那张卡）。数据走与「诊断」tab 同一条 RPC
+    // （`ascend-traces-list`），排序也用同一份 `valueRankOf`——两处各算一份就会漂移。
+    // 这里是**只读 + 导航**：不写 trace、不生成指令，指令仍然在「诊断」tab 里。
+    //
+    // 键盘按一等用法设计：打开即聚焦搜索框，↑↓ 选行、Enter 打开、Esc 关闭、Tab 在卡内循环。
+    // 用它的人在做"批量翻"——一条条鼠标点开再关掉，比键盘慢一个数量级。
+    const LEDGER_FILTERS = [
+      { id: 'all', label: '全部', test: () => true },
+      { id: 'pending', label: '待回报', test: s => !!s.feedbackPending },
+      { id: 'reusable', label: '可复用', test: s => sedStateOf(s) !== 'none' || !!s.activeCaseInKb },
+      { id: 'open', label: '未收尾', test: s => isOpenOf(s) },
+      { id: 'recent', label: '近 30 天', test: s => {
+        const t = new Date(s.createdAt || s.updatedAt || 0).getTime()
+        return !isNaN(t) && (Date.now() - t) <= 30 * 86400000
+      } },
+    ]
+
+    // 会话列表快照：面板要标出"你已经在这一条里"（否则点一行没反应，读起来像坏了），
+    // 底部计数则回答"还有多少会话根本没有诊断记录"。服务不在时返回 null，两边都只说能说的。
+    function sessionListSnapshot() {
+      try {
+        const svc = sessionsService()
+        if (!svc || !svc.list || typeof svc.list.getSnapshot !== 'function') return null
+        return svc.list.getSnapshot() || null
+      } catch (e) {
+        return null
+      }
+    }
+
     function LedgerPanel() {
       const open = useLedgerOpen()
       const [state, setState] = React.useState({ loading: false, data: null })
       const [q, setQ] = React.useState('')
       const [navMsg, setNavMsg] = React.useState(null)
+      const [filter, setFilter] = React.useState('all')
+      const [active, setActive] = React.useState(0)
+      const snap = sessionListSnapshot()
+      const currentId = snap && snap.current ? String(snap.current) : ''
+      const workspaceTotal = snap && Array.isArray(snap.ids) ? snap.ids.length : null
+
       React.useEffect(() => {
         if (!open) return undefined
         let alive = true
@@ -4131,53 +4180,128 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
         // 首帧之外没人保证它是本组件写进去的对象。
         setState(prev => ({ loading: true, data: (prev && prev.data) || null }))
         host.call('ascend-traces-list', { sessionId: null })
-          .then(r => { if (alive) setState({ loading: false, data: r }) })
-          .catch(() => { if (alive) setState({ loading: false, data: { ok: false, error: 'Host RPC 失败' } }) })
+          .then(res => {
+            if (alive) setState({ loading: false, data: res })
+          })
+          .catch(() => {
+            if (alive) setState({ loading: false, data: { ok: false, error: 'Host RPC 失败' } })
+          })
         return () => { alive = false }
       }, [open])
-      // Esc 关闭：浮层盖住整个界面，没有键盘出口会把人困在模态里。
-      React.useEffect(() => {
-        if (!open || typeof document === 'undefined') return undefined
-        const onKey = e => { if (e.key === 'Escape') { setNavMsg(null); setLedgerOpen(false) } }
-        document.addEventListener('keydown', onKey)
-        return () => { document.removeEventListener('keydown', onKey) }
-      }, [open])
-      if (!open) return null
-      // 两个本地 state 都按"读到什么就当什么"用：面板渲染检查用共享 hook 槽的 mock，
-      // 这里拿到的值可能来自别的组件（真实 React 不会），不该因此把整个 tab 拖崩。
+
+      // 读到什么就当什么：面板渲染检查用共享 hook 槽的 mock，这里拿到的值可能来自别的组件
+      // （真实 React 不会），不该因此把整个面板拖崩。
       const st = (state && typeof state === 'object') ? state : { loading: true, data: null }
       const qText = typeof q === 'string' ? q : ''
       const r = st.data
       const all = (r && r.ok && Array.isArray(r.sessions)) ? r.sessions : []
       const KW_LIMIT = 40
       const kw = qText.trim().toLowerCase()
-      const matched = kw
+      const searched = kw
         ? all.filter(s => [s.sessionId, s.summarySnippet, s.activeCase, s.framework, s.platform, s.status]
             .filter(Boolean).join(' ').toLowerCase().includes(kw))
         : all
-      const shown = matched.slice()
-        .sort((a, b) => valueRankOf(b) - valueRankOf(a) || updatedTsOf(b) - updatedTsOf(a))
-        .slice(0, KW_LIMIT)
+      const activeFilter = LEDGER_FILTERS.filter(f => f.id === filter)[0] || LEDGER_FILTERS[0]
+      const filtered = filter === 'all' ? searched : searched.filter(activeFilter.test)
+      const sorted = filtered.slice().sort((a, b) => valueRankOf(b) - valueRankOf(a) || updatedTsOf(b) - updatedTsOf(a))
+      const shown = sorted.slice(0, KW_LIMIT)
+      const counts = {}
+      for (const f of LEDGER_FILTERS) counts[f.id] = f.id === 'all' ? searched.length : searched.filter(f.test).length
+
       const close = () => { setNavMsg(null); setLedgerOpen(false) }
+      const openRow = row => {
+        if (!row) return
+        const target = row.harnessSession ? String(row.harnessSession) : ''
+        if (currentId && target && target === currentId) {
+          setNavMsg('你已经在这一条会话里了')
+          return
+        }
+        if (!target) {
+          setNavMsg('这单的轨迹没记 harness_session（写入该字段之前的单），定位不到会话；'
+            + '补法：python3 scripts/link_harness_sessions.py --apply')
+          return
+        }
+        openSession(target).then(res => {
+          if (res.ok) close()
+          else setNavMsg(res.reason)
+        })
+      }
+
+      // 键盘：Esc 关、↑↓ 选、Enter 开、Tab 在卡内循环。没有键盘出口的模态会把键盘用户困住，
+      // 而这里的主要用法本来就是键盘。
+      React.useEffect(() => {
+        if (!open || typeof document === 'undefined') return undefined
+        const search = document.querySelector('[data-ledger-search]')
+        if (search && typeof search.focus === 'function') search.focus()
+        const onKey = e => {
+          if (e.key === 'Escape') { e.preventDefault(); setNavMsg(null); setLedgerOpen(false); return }
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault()
+            const step = e.key === 'ArrowDown' ? 1 : -1
+            setActive(i => Math.max(0, Math.min(shown.length - 1, (typeof i === 'number' ? i : 0) + step)))
+            return
+          }
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            openRow(shown[typeof active === 'number' ? active : 0])
+            return
+          }
+          if (e.key !== 'Tab') return
+          const card = document.querySelector('[data-ledger-card]')
+          if (!card || typeof card.querySelectorAll !== 'function') return
+          const focusables = card.querySelectorAll('button, input, [tabindex]:not([tabindex="-1"])')
+          if (!focusables.length) return
+          const first = focusables[0]
+          const last = focusables[focusables.length - 1]
+          const here = document.activeElement
+          if (e.shiftKey && here === first) { e.preventDefault(); last.focus() }
+          else if (!e.shiftKey && here === last) { e.preventDefault(); first.focus() }
+        }
+        document.addEventListener('keydown', onKey)
+        return () => { document.removeEventListener('keydown', onKey) }
+      }, [open, active, shown])
+
+      // 选中的行滚进视野（键盘翻页时不能让高亮跑到卡外）。
+      React.useEffect(() => {
+        if (!open || typeof document === 'undefined') return undefined
+        const el = document.querySelector('[data-ledger-row="' + String(active) + '"]')
+        if (el && typeof el.scrollIntoView === 'function') {
+          try { el.scrollIntoView({ block: 'nearest' }) } catch (e) { /* 老浏览器不支持对象参数就跳过 */ }
+        }
+        return undefined
+      }, [open, active])
+
+      if (!open) return null
       return React.createElement('div', {
         className: 'sleu sleu-ledger-backdrop',
         // 点遮罩关闭：只在遮罩自身被点中时触发，卡片内部的点击不会冒泡成关闭。
         onMouseDown: e => { if (e.target === e.currentTarget) close() },
       },
-        React.createElement('div', { className: 'sleu-ledger-card', role: 'dialog', 'aria-modal': 'true', 'aria-label': '诊断记录' },
+        React.createElement('div', { className: 'sleu-ledger-card', role: 'dialog', 'aria-modal': 'true', 'aria-label': '诊断记录', 'data-ledger-card': 'true' },
           React.createElement('div', { className: 'sleu-ledger-head' },
             React.createElement('span', { style: { fontSize: 'var(--t-lg)', fontWeight: 700 } }, '诊断记录'),
             React.createElement('span', { style: { color: T.text2, fontSize: 'var(--t-tiny)' } },
-              (r && r.ok) ? (all.length + ' 条诊断会话 · 按价值排') : '读不到诊断记录'),
+              (r && r.ok)
+                ? (all.length + ' 条诊断记录' + (workspaceTotal === null ? '' : ' · 本工作区 ' + workspaceTotal + ' 个会话'))
+                : '读不到诊断记录'),
             React.createElement('input', {
-              value: qText, placeholder: '过滤会话号 / 背景 / 案例', 'aria-label': '过滤诊断记录',
-              onChange: e => setQ(e.target.value),
+              value: qText, placeholder: '过滤会话号 / 背景 / 案例', 'aria-label': '过滤诊断记录', 'data-ledger-search': 'true',
+              onChange: e => { setQ(e.target.value); setActive(0) },
               style: { marginLeft: 'auto', width: 190, padding: '6px 9px', fontSize: 'var(--t-sm)', borderRadius: 'var(--r-md)', border: '1px solid var(--hair)', background: T.bg, color: T.text },
             }),
             React.createElement('button', {
               type: 'button', onClick: close, title: '关闭（Esc）', 'aria-label': '关闭诊断记录',
               style: { border: 'none', background: 'transparent', color: T.text2, cursor: 'pointer', fontSize: 'var(--t-lg)', lineHeight: 1, padding: '2px 6px' },
             }, '×'),
+          ),
+          // 五个筛选：计数按搜索后的集合算，所以"待回报 3"始终和旁边的"全部 12"同一口径。
+          React.createElement('div', { className: 'sleu-ledger-chips' },
+            LEDGER_FILTERS.map(f => React.createElement('button', {
+              key: f.id, type: 'button', className: 'sleu-ledger-chip',
+              'aria-pressed': f.id === filter ? 'true' : 'false',
+              onClick: () => { setFilter(f.id); setActive(0) },
+            }, f.label + (counts[f.id] ? ' ' + counts[f.id] : ''))),
+            React.createElement('span', { className: 'sleu-ledger-hint' }, '↑↓ 选行 · Enter 打开 · Esc 关闭'),
           ),
           navMsg ? React.createElement('div', { style: { padding: '6px 14px', color: 'var(--c-amber)', fontSize: 'var(--t-tiny)' } }, navMsg) : null,
           st.loading && !r ? React.createElement('div', { className: 'sleu-ledger-empty' }, '正在读诊断记录…')
@@ -4190,25 +4314,21 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
                     '这个工作区还没有诊断记录。跑一次 /skill:diagnose 之后会出现在这里。')
                 : React.createElement('div', { className: 'sleu-ledger-body' },
                     shown.length
-                      ? shown.map(s => {
+                      ? shown.map((s, i) => {
                           const meta = statusMeta[String(s.status || 'unknown')] || statusMeta.unknown
                           const hit = caseKindOf(s) === 'case'
+                          const isCurrent = !!(currentId && s.harnessSession && String(s.harnessSession) === currentId)
+                          const isActive = i === (typeof active === 'number' ? active : 0)
                           return React.createElement('button', {
-                            key: s.file || s.sessionId, type: 'button', className: 'sleu-ledger-row',
+                            key: s.file || s.sessionId, type: 'button',
+                            className: 'sleu-ledger-row' + (isActive ? ' is-active' : ''),
+                            'data-ledger-row': String(i),
+                            'aria-selected': isActive ? 'true' : 'false',
+                            onMouseEnter: () => setActive(i),
                             title: s.harnessSession
-                              ? '切到会话 ' + String(s.harnessSession)
+                              ? (isCurrent ? '你已经在这一条会话里' : '切到会话 ' + String(s.harnessSession))
                               : '这单没记 harness_session，点一下会说明补法',
-                            onClick: () => {
-                              if (!s.harnessSession) {
-                                setNavMsg('这单的轨迹没记 harness_session（写入该字段之前的单），定位不到会话；'
-                                  + '补法：python3 scripts/link_harness_sessions.py --apply')
-                                return
-                              }
-                              openSession(String(s.harnessSession)).then(res => {
-                                if (res.ok) close()
-                                else setNavMsg(res.reason)
-                              })
-                            },
+                            onClick: () => openRow(s),
                           },
                             React.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: 6, color: meta.color, fontSize: 'var(--t-sm)', fontWeight: 700, whiteSpace: 'nowrap' } },
                               React.createElement(Dot, { color: meta.color, hollow: s.status === 'unknown' }), meta.label),
@@ -4216,26 +4336,27 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
                             React.createElement('span', { className: 'sleu-ledger-sum', title: s.summarySnippet || s.lastOutput || '' },
                               s.summarySnippet || s.lastOutput || '（没有背景段）'),
                             React.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end', whiteSpace: 'nowrap' } },
-                              hit ? React.createElement('span', { style: Object.assign(tinyBadge('var(--d-green)'), { fontSize: 'var(--t-tiny)' }) }, String(s.activeCase)) : null,
-                              // 回报债：与侧栏行首那个点、悬停卡第一行**同一条轴、同一个词**。
-                              // 少了这一格，从「已定位」跳过去会看到侧栏写「待回报」，读起来像两个页面各说一套；
-                              // 加上之后读者在本行就知道：收尾状态（左侧徽标）之外，还有一条 fix 没被现场验证。
+                              hit ? React.createElement('span', { style: Object.assign(tinyBadge(s.activeCaseInKb ? 'var(--d-green)' : 'var(--d-amber)'), { fontSize: 'var(--t-tiny)' }),
+                                title: s.activeCaseInKb ? '命中的案例知识库里已有（可直接对照）' : '命中了案例，但知识库里还没有它（新形态，值得先看）',
+                              }, String(s.activeCase) + (s.activeCaseInKb ? '' : ' · 新形态')) : null,
                               s.feedbackPending ? React.createElement('span', {
                                 style: Object.assign(tinyBadge('var(--d-amber)'), { fontSize: 'var(--t-tiny)' }),
                                 title: '轨迹里 feedback.outcome 还是 pending：给了 fix，现场还没回报是否生效。'
                                   + '它与收尾状态（status）是两条独立的轴——已定位表示这次诊断已收尾，'
-                                  + '待回报表示那个 fix 还没被验证。侧栏行首的琥珀色空心点就是这一条。',
+                                  + '待回报表示那个 fix 还没被验证。侧栏行首的琥珀色缺环就是这一条。',
                               }, '待回报 · ' + ledgerDebtText(s)) : null,
                               sedStateOf(s) !== 'none' ? React.createElement('span', { style: Object.assign(tinyBadge('var(--d-purple)'), { fontSize: 'var(--t-tiny)' }) }, '已沉淀') : null,
+                              isCurrent ? React.createElement('span', { style: Object.assign(tinyBadge('var(--d-blue)'), { fontSize: 'var(--t-tiny)' }) }, '当前') : null,
                               React.createElement('span', { style: { color: T.text2, fontSize: 'var(--t-tiny)' } }, relTime(s.updatedAt || s.createdAt) || '—')),
                             React.createElement('span', { 'aria-hidden': 'true', style: { color: T.text2, fontSize: 'var(--t-md)' } }, '→'))
                         })
-                      : React.createElement('div', { className: 'sleu-ledger-empty' }, '没有匹配「' + qText.trim() + '」的会话。'),
+                      : React.createElement('div', { className: 'sleu-ledger-empty' },
+                          kw ? '没有匹配「' + qText.trim() + '」的会话。' : '「' + activeFilter.label + '」下没有会话。'),
                   ),
           React.createElement('div', { className: 'sleu-ledger-foot' },
             React.createElement('span', null, '排序：已沉淀 ＞ 库中已有案例 ＞ 新形态 ＞ fix 已生效 ＞ 已定位 ＞ 其余；同档按最后更新时间。'),
             React.createElement('span', null, '只读 traces/，写操作仍在「诊断」tab 里生成指令。'),
-            all.length > KW_LIMIT ? React.createElement('span', null, '当前只列前 ' + KW_LIMIT + ' 条，搜索可收窄。') : null),
+            sorted.length > KW_LIMIT ? React.createElement('span', null, '当前只列前 ' + KW_LIMIT + ' 条，搜索或筛选可收窄。') : null),
         ),
       )
     }
