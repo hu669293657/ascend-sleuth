@@ -17,10 +17,13 @@
 | 可展开块 | 统一用 `.sleu-fold`（标题条 + 箭头 + 可选提示），不裸用 `<details>` 或 chip 暗示；动作组在触发按钮所在行**下方**展开，两组常驻 DOM 用 `display` 切换，不挤动兄弟元素 | 人审（渲染检查无几何断言） |
 | 响应式 | 面板跑在可变宽度的 tab 里：按**容器宽度**降级（容器查询），窄时收列、展开态单列；不假设全宽、也不让整页横向滚动 | 人审（渲染检查只断言容器查询存在） |
 | 只读边界 | 面板是只读可视化 + 指令生成器；不做决策与写入 | 人审（`skills/preload-panel/SKILL.md`） |
+| 注册席位 | 两个 `conversation.view` tab（诊断 / 指标）+ 侧栏页脚「诊断记录」入口（`sidebar.footer.action`）+ 「诊断记录」浮层（`shell.overlay`）。后两个是附加席位：新 id 落在自带项旁边，不替换任何自带组件 | `node scripts/panel_render_check.js`（钉四个注册与各自 id） |
 | 依赖缺失时的退化 | 拿不到数据时给一行说明 + 可行的下一步，不占位、不拿别处的数据冒充 | `node scripts/panel_render_check.js`（退化路径一节，含 5 个缺件用例） |
 | 面板包产物 | 面板源码（`dsh-plugins/<面板>/panel-host.js`、`panel-client.js`，以及整页的 `dsh-plugins/sleuth-console/console-client.js`）是唯一真源，`dsh-plugins/dsh-sleuth-panels/lib/` 是生成物 | `node scripts/build_panel_bundle.js --check` |
 | 面板包版本 | `package.json` 的 `version` 是安装器的判新旧依据：**改源码后必须递增，并重跑生成器**（版本号在构建时注入 `lib/client.js` 的 `PANEL_VERSION`，只改一处会不一致）。不递增，`panel_install` 会判"已是最新"不换装（实测踩过）；忘了 bump 时用 `--force` 强制换装 | 人审（`--check` 看不出内容是否变了） |
 | 面板包可加载性 | 常驻插件包适配层的 host 四样（`harness.handle` → prefix 路由、信封格式、`harness.defineTool` 的 parameters 归一化、`shell.run` → `execute` + `result()`）+ client 的 `host.call` 映射（诊断 tab、Ascend Sleuth的指标子页、自演进子页各验一条 RPC）+ 三个注册面的 id 对齐（`conversation.view` / `main` 的 key / `sidebar.panellist` 的 id）+ 三处名字对齐（`package.json` / `cordis.patch.yml` / 产物 export） | `node scripts/check_panel_bundle.js` |
+| 客户端注入清单 | `lib/client.js` 的 `exports.inject` 必须有 `sessions`：cordis 只对声明过的服务名建键，`ctx.get('sessions')` 在未声明时返回 undefined——面板的「打开会话」「诊断记录」都靠它切会话，缺了就只剩一句"没有提供打开会话的接口" | `node scripts/check_panel_bundle.js`（断言 inject 含 `sessions`） |
+| 面板包可加载性 | 常驻插件包适配层的 host 四样（`harness.handle` → prefix 路由、信封格式、`harness.defineTool` 的 parameters 归一化、`shell.run` → `execute` + `result()`）+ client 的 `host.call` 映射（渲染三个 tab 的首屏各验一条 RPC）+ 三处名字对齐（`package.json` / `cordis.patch.yml` / 产物 export） | `node scripts/check_panel_bundle.js` |
 | 面板包外部契约 | 已安装 DSH 的五条接缝：`webServer.register(route)` 含 prefix、`connection.requestRejection`、client 沙箱的 `styles.insert`、页面产物格式 `__ModuleLoader__.load`、shell 的 `resolve` + `execute` | 同上（末段 DSH 探针；`--selftest-dsh` 自测） |
 
 **结果复用窗口**（两个面板同一条约定）：面板取数要起 Python 子进程，而切走 tab 再切回会重新挂载

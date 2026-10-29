@@ -404,7 +404,9 @@ function renderClient() {
     '    ]',
     '',
     "    exports.name = '" + BUNDLE_NAME + "'",
-    "    exports.inject = ['slots', 'connection']",
+    // `sessions` 必须声明：cordis 的 ctx.get(name) 只对声明过 inject 的服务建键，
+    // 不声明就拿不到会话服务——面板的「打开会话」与侧栏「诊断记录」都靠它切会话。
+    "    exports.inject = ['slots', 'connection', 'sessions']",
     '    exports.apply = function apply(ctx) {',
     '      const host = makeHost(ctx)',
     '      const styles = makeStyles()',
