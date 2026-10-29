@@ -1884,11 +1884,11 @@ _MS._run_no_pipe = no_fallback`)
       }
       let tree = await pump(4)
       let texts = textOf(tree)
-      expect('报告入口在收起态的卡片上就有（「读正文」）', /读正文/.test(texts), texts.slice(0, 200))
+      expect('报告入口在收起态的卡片上就有（「看报告」）', /看报告/.test(texts), texts.slice(0, 200))
       const hs = []
       tree.forEach(t => collectHandlers(t, hs))
       // 按钮的 flatten 文本会把 title 一并收集，所以按"以标签结尾"匹配（不按全等）
-      const btn = hs.filter(h => /读正文$/.test(h.text.trim()))[0]
+      const btn = hs.filter(h => /看报告$/.test(h.text.trim()))[0]
       expect('报告入口可点', !!btn)
       if (btn) {
         btn.fn({})
@@ -1902,7 +1902,7 @@ _MS._run_no_pipe = no_fallback`)
         expect('展开态给指标带（每步耗时 / 检索 / token 三张图）',
           /每步耗时/.test(texts) && /检索/.test(texts) && /token/.test(texts))
         expect('展开态正文与报告入口同时在场（挪进操作栏不等于挪丢）',
-          /轨迹|用户输入/.test(texts) && /收起正文/.test(texts))
+          /轨迹|用户输入/.test(texts) && /收起报告/.test(texts))
         expect('报告默认停在 TL;DR 节（正文里先给结论）', /现象：profile_run 崩溃/.test(texts))
         expect('只渲染所选那一节（依据链正文不上屏，避免把整份报告铺开）', !/该构建已脱离分支/.test(texts))
         expect('报告是只读入口（没有写入报告的 RPC）', !/ascend-write-report/.test(ascSrc))
@@ -2855,10 +2855,11 @@ print(json.dumps([{'role': s(t.get('role')), 'step': s(t.get('step')), 'action':
     expect('面板把列表耗时放进统计胶囊的 title', /列表耗时 ' \+ r\.elapsedMs/.test(ascSrc))
     expect('读报告与列表用同一个报告名口径（否则"入口指向 A、点开读 B"）',
       (hostSrc.match(/reportFileOf\(/g) || []).length >= 3)
-    // 两个入口的词必须不同：「读正文」在面板里读、「用系统应用打开」交给外部应用。
-    // 旧版是「看报告」与「打开报告」——四个字差两个，实测被读成同一个动作。
-    expect('报告两个入口的文案不同（读正文 / 用系统应用打开）',
-      /'traces\/' \+ s\.reportFile/.test(ascSrc) && /读正文/.test(ascSrc) && /用系统应用打开/.test(ascSrc))
+    // 两个入口的词必须不同，且分指两样东西：「看报告」（在面板里读内容）与
+    // 「打开报告文件」（把 .md 交给默认应用）。这两句被读过两版：
+    // 「看报告 / 打开报告」四个字差两个 → 混；「读正文 / 用系统应用打开」→ 像术语。
+    expect('报告两个入口的文案不同（看报告 / 打开报告文件）',
+      /'traces\/' \+ s\.reportFile/.test(ascSrc) && /看报告/.test(ascSrc) && /打开报告文件/.test(ascSrc))
     expect('client 说明入口是"按同名规则找到"的（trace 未记报告名时不许闷着）',
       /s\.reportSource === 'name'/.test(ascSrc) && /按同名规则找到/.test(ascSrc))
     expect('client 显示沉淀建议条数（措辞是"建议"不是"待沉淀"——它不是债务）',
@@ -2899,13 +2900,13 @@ print(json.dumps([{'role': s(t.get('role')), 'step': s(t.get('step')), 'action':
         !/占位串/.test(ct) && !/case id/.test(ct) && !/active_case/.test(ct), ct.slice(0, 300))
       expect('原值的解释放在 tooltip 里（hover 可查）',
         /«title:trace 里记的定位值（不是知识库里的 case）»/.test(ct))
-      expect('报告入口：有报告的那张卡给「读正文」「用系统应用打开」，没有的不给',
-        (ct.match(/读正文/g) || []).length === 1 && (ct.match(/用系统应用打开/g) || []).length === 1,
-        '读正文=' + (ct.match(/读正文/g) || []).length)
+      expect('报告入口：有报告的那张卡给「看报告」「打开报告文件」，没有的不给',
+        (ct.match(/看报告/g) || []).length === 1 && (ct.match(/打开报告文件/g) || []).length === 1,
+        '看报告=' + (ct.match(/看报告/g) || []).length)
       expect('报告名来自同名规则时说明来源（trace 未记报告名不许闷着）',
         /按同名规则找到/.test(ct) && /s-rep\.report\.md/.test(ct))
-      expect('「用系统应用打开」给的是单层 traces/ 路径（拼两层会打开不存在的文件）',
-        /«title:交给系统默认应用打开这份文件：traces\/s-rep\.report\.md»/.test(ct) && !/traces\/traces\//.test(ct),
+      expect('「打开报告文件」给的是单层 traces/ 路径（拼两层会打开不存在的文件）',
+        /«title:用默认应用打开这份报告文件（\.md）：traces\/s-rep\.report\.md»/.test(ct) && !/traces\/traces\//.test(ct),
         (ct.match(/«title:[^»]*»/g) || []).join(' '))
     }
     // —— 未闭环 / 待沉淀 / 待升格：状态徽标 + 批量入口（2026-10）——
