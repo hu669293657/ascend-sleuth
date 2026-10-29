@@ -132,12 +132,19 @@ async function renderAsync(clientSrc, slotProps, hostImpl, { settle = 8, views, 
     'return (function(){' + clientSrc + '})()')(React, host, stylesGlobal, views)
   plugin.apply(ctx)
   if (requireSlots && !registrations.length) throw new Error('未注册任何 slot')
+  // 这一层只渲染 **tab 的视图组件**（`conversation.view`）。附加席位（侧栏「诊断记录」页脚入口与
+  // 它的浮层）不是 tab 内容：它们的文本混进 `text` 会让"tab 上有什么"的断言无从判断；而 mock
+  // React 的 hook 槽是同一份全局数组，附加组件的 state 会被别的视图读成自己的（CI 上实测：
+  // 浮层的 `open` 被指标视图读成展开开关，「收起态不摊开动作正文」无理由变红）。
+  // 附加席位的"渲染不抛"由 `check_panel_bundle.js` 逐个注册渲染来守。
+  const rendered = registrations.filter(r => r.opts && r.opts.name === 'conversation.view')
   let out = []
   for (let round = 0; round < settle; round++) {
     effectQueue = []
     hookIdx = 0
     out = []
-    registrations.forEach(r => flatten(r.comp(slotProps), out))
+    const queue = rendered.length ? rendered : registrations
+    queue.forEach(r => flatten(r.comp(slotProps), out))
     const effects = effectQueue.slice()
     if (!effects.length) break
     effects.forEach(fn => fn())
