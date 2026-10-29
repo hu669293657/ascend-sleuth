@@ -2131,16 +2131,17 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
       const docRow = (reportPath || s.sedimentCandidates)
         ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
             // 两个入口的词必须不同：一个在面板里读（TL;DR / 依据链 / 一键复制全文），
-            // 一个交给系统应用打开那份 .md 文件。旧版写作「看报告」与「打开报告」，
-            // 四个字里只差两个，实测被读成同一个动作。
+            // 一个把那**份文件**交给默认应用打开。旧的「看报告 / 打开报告」四个字里只差两个、
+            // 且都以"报告"结尾，实测被读成同一个动作；「读正文」「用系统应用打开」又被读成
+            // 术语（"正文"指什么、"系统应用"是什么）。现在两个词分指两样东西：报告 / 报告文件。
             reportPath ? React.createElement('button', {
-              type: 'button', onClick: toggleReport, title: '在面板里读报告：TL;DR / 依据链 / 修复方案，可一键复制全文',
+              type: 'button', onClick: toggleReport, title: '在面板里看这份报告：TL;DR / 依据链 / 修复方案，可一键复制全文',
               style: { background: reportOpen ? 'color-mix(in srgb, ' + T.brand + ' 10%, transparent)' : 'transparent', border: '1px solid ' + T.border, color: T.text, borderRadius: 'var(--r-pill)', padding: '2px 11px', fontSize: 'var(--t-tiny)', fontWeight: 600, cursor: 'pointer' },
-            }, reportOpen ? '收起正文' : '读正文') : null,
+            }, reportOpen ? '收起报告' : '看报告') : null,
             reportPath ? React.createElement('button', {
-              type: 'button', onClick: () => openFile(reportPath), title: '交给系统默认应用打开这份文件：' + reportPath,
+              type: 'button', onClick: () => openFile(reportPath), title: '用默认应用打开这份报告文件（.md）：' + reportPath,
               style: { background: 'transparent', border: '1px solid ' + T.brand, color: T.brand, borderRadius: 'var(--r-pill)', padding: '2px 11px', fontSize: 'var(--t-tiny)', fontWeight: 600, cursor: 'pointer' },
-            }, opening === reportPath ? '打开中…' : '用系统应用打开') : null,
+            }, opening === reportPath ? '打开中…' : '打开报告文件') : null,
             // 入口是**靠同名规则**找到的（trace 里没记 `report_file`）就说出来：报告明明落在
             // traces/ 里而卡片上什么都不给，读者只会以为"面板读不到报告"（实测反馈）。
             s.reportSource === 'name' ? React.createElement('span', { title: 'trace 里没有 report_file；这份报告是按 <trace 同名>.report.md 的规则找的', style: { color: T.text2, fontSize: 'var(--t-tiny)' } },

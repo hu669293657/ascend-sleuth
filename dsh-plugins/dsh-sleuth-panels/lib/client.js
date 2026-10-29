@@ -1,6 +1,6 @@
 /* eslint-disable */
 // 生成物 —— 勿手改。由 `node scripts/build_panel_bundle.js` 从下列源文件拼出：
-//   dsh-plugins/ascend-panel/panel-client.js  (sha256:0bfd769b98bf)
+//   dsh-plugins/ascend-panel/panel-client.js  (sha256:39611429d905)
 //   dsh-plugins/ev-panel/panel-client.js  (sha256:f684735469ce)
 //   dsh-plugins/sleuth-console/console-client.js  (sha256:119062e6c579)
 // 校验：`node scripts/build_panel_bundle.js --check`。
@@ -70,7 +70,7 @@ window.__ModuleLoader__.load({
       id: 'ascend-panel',
       build(host, styles) {
         return (function () {
-// ---- dsh-plugins/ascend-panel/panel-client.js (sha256:0bfd769b98bf) 原文开始 ----
+// ---- dsh-plugins/ascend-panel/panel-client.js (sha256:39611429d905) 原文开始 ----
 return {
   apply(ctx) {
     const slots = ctx.get('slots')
@@ -467,7 +467,7 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
     // 构建时注入的面板包版本（`scripts/build_panel_bundle.js` 把占位符换成 package.json 的 version）。
     // 为什么要有：面板是「装进 profile 的常驻插件 + 浏览器按 rev 缓存」两层，改完看不到新版时
     // 无法区分"装的还是旧包"与"浏览器缓存了旧 bundle"。有这个串，一眼就能判。
-    const PANEL_VERSION = '0.7.8'
+    const PANEL_VERSION = '0.7.9'
 
     function shortUrl(u) {
       const s = String(u).replace(/^https?:\/\//i, '')
@@ -2204,16 +2204,17 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
       const docRow = (reportPath || s.sedimentCandidates)
         ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
             // 两个入口的词必须不同：一个在面板里读（TL;DR / 依据链 / 一键复制全文），
-            // 一个交给系统应用打开那份 .md 文件。旧版写作「看报告」与「打开报告」，
-            // 四个字里只差两个，实测被读成同一个动作。
+            // 一个把那**份文件**交给默认应用打开。旧的「看报告 / 打开报告」四个字里只差两个、
+            // 且都以"报告"结尾，实测被读成同一个动作；「读正文」「用系统应用打开」又被读成
+            // 术语（"正文"指什么、"系统应用"是什么）。现在两个词分指两样东西：报告 / 报告文件。
             reportPath ? React.createElement('button', {
-              type: 'button', onClick: toggleReport, title: '在面板里读报告：TL;DR / 依据链 / 修复方案，可一键复制全文',
+              type: 'button', onClick: toggleReport, title: '在面板里看这份报告：TL;DR / 依据链 / 修复方案，可一键复制全文',
               style: { background: reportOpen ? 'color-mix(in srgb, ' + T.brand + ' 10%, transparent)' : 'transparent', border: '1px solid ' + T.border, color: T.text, borderRadius: 'var(--r-pill)', padding: '2px 11px', fontSize: 'var(--t-tiny)', fontWeight: 600, cursor: 'pointer' },
-            }, reportOpen ? '收起正文' : '读正文') : null,
+            }, reportOpen ? '收起报告' : '看报告') : null,
             reportPath ? React.createElement('button', {
-              type: 'button', onClick: () => openFile(reportPath), title: '交给系统默认应用打开这份文件：' + reportPath,
+              type: 'button', onClick: () => openFile(reportPath), title: '用默认应用打开这份报告文件（.md）：' + reportPath,
               style: { background: 'transparent', border: '1px solid ' + T.brand, color: T.brand, borderRadius: 'var(--r-pill)', padding: '2px 11px', fontSize: 'var(--t-tiny)', fontWeight: 600, cursor: 'pointer' },
-            }, opening === reportPath ? '打开中…' : '用系统应用打开') : null,
+            }, opening === reportPath ? '打开中…' : '打开报告文件') : null,
             // 入口是**靠同名规则**找到的（trace 里没记 `report_file`）就说出来：报告明明落在
             // traces/ 里而卡片上什么都不给，读者只会以为"面板读不到报告"（实测反馈）。
             s.reportSource === 'name' ? React.createElement('span', { title: 'trace 里没有 report_file；这份报告是按 <trace 同名>.report.md 的规则找的', style: { color: T.text2, fontSize: 'var(--t-tiny)' } },
