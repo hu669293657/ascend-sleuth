@@ -1,6 +1,6 @@
 /* eslint-disable */
 // 生成物 —— 勿手改。由 `node scripts/build_panel_bundle.js` 从下列源文件拼出：
-//   dsh-plugins/ascend-panel/panel-client.js  (sha256:a389e9c8803f)
+//   dsh-plugins/ascend-panel/panel-client.js  (sha256:b685c4d61b2e)
 //   dsh-plugins/ev-panel/panel-client.js  (sha256:f684735469ce)
 //   dsh-plugins/sleuth-console/console-client.js  (sha256:119062e6c579)
 // 校验：`node scripts/build_panel_bundle.js --check`。
@@ -70,7 +70,7 @@ window.__ModuleLoader__.load({
       id: 'ascend-panel',
       build(host, styles) {
         return (function () {
-// ---- dsh-plugins/ascend-panel/panel-client.js (sha256:a389e9c8803f) 原文开始 ----
+// ---- dsh-plugins/ascend-panel/panel-client.js (sha256:b685c4d61b2e) 原文开始 ----
 return {
   apply(ctx) {
     const slots = ctx.get('slots')
@@ -457,7 +457,7 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
     // 构建时注入的面板包版本（`scripts/build_panel_bundle.js` 把占位符换成 package.json 的 version）。
     // 为什么要有：面板是「装进 profile 的常驻插件 + 浏览器按 rev 缓存」两层，改完看不到新版时
     // 无法区分"装的还是旧包"与"浏览器缓存了旧 bundle"。有这个串，一眼就能判。
-    const PANEL_VERSION = '0.7.5'
+    const PANEL_VERSION = '0.7.6'
 
     function shortUrl(u) {
       const s = String(u).replace(/^https?:\/\//i, '')
@@ -4161,6 +4161,15 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
         wide ? React.createElement('span', null, '诊断记录') : null)
     }
 
+    // 回报债的天数：起算日优先用 trace 的 `feedback_pending_since`（skill 写的），
+    // 没有再退到更新时间。两个都没有就说「天数未记录」——写 0 会被读成"今天刚欠下"。
+    function ledgerDebtText(s) {
+      const raw = (s && (s.feedbackPendingSince || s.updatedAt || s.createdAt)) || ''
+      const t = raw ? new Date(raw).getTime() : NaN
+      if (isNaN(t)) return '天数未记录'
+      return '欠 ' + Math.max(0, Math.floor((Date.now() - t) / 86400000)) + ' 天'
+    }
+
     // 浮层本体。数据走与「诊断」tab 同一条 RPC（`ascend-traces-list`），排序也用同一份
     // `valueRankOf`——两处各算一份就会漂移。这里是**只读 + 导航**：不写 trace、不生成指令，
     // 指令仍然在「诊断」tab 里（那条纪律见 skills/preload-panel/SKILL.md 的只读边界）。
@@ -4262,6 +4271,15 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
                               s.summarySnippet || s.lastOutput || '（没有背景段）'),
                             React.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end', whiteSpace: 'nowrap' } },
                               hit ? React.createElement('span', { style: Object.assign(tinyBadge('var(--d-green)'), { fontSize: 'var(--t-tiny)' }) }, String(s.activeCase)) : null,
+                              // 回报债：与侧栏行首那个点、悬停卡第一行**同一条轴、同一个词**。
+                              // 少了这一格，从「已定位」跳过去会看到侧栏写「待回报」，读起来像两个页面各说一套；
+                              // 加上之后读者在本行就知道：收尾状态（左侧徽标）之外，还有一条 fix 没被现场验证。
+                              s.feedbackPending ? React.createElement('span', {
+                                style: Object.assign(tinyBadge('var(--d-amber)'), { fontSize: 'var(--t-tiny)' }),
+                                title: '轨迹里 feedback.outcome 还是 pending：给了 fix，现场还没回报是否生效。'
+                                  + '它与收尾状态（status）是两条独立的轴——已定位表示这次诊断已收尾，'
+                                  + '待回报表示那个 fix 还没被验证。侧栏行首的琥珀色空心点就是这一条。',
+                              }, '待回报 · ' + ledgerDebtText(s)) : null,
                               sedStateOf(s) !== 'none' ? React.createElement('span', { style: Object.assign(tinyBadge('var(--d-purple)'), { fontSize: 'var(--t-tiny)' }) }, '已沉淀') : null,
                               React.createElement('span', { style: { color: T.text2, fontSize: 'var(--t-tiny)' } }, relTime(s.updatedAt || s.createdAt) || '—')),
                             React.createElement('span', { 'aria-hidden': 'true', style: { color: T.text2, fontSize: 'var(--t-md)' } }, '→'))
