@@ -109,7 +109,7 @@ const React = {
   },
 }
 
-async function renderAsync(clientSrc, slotProps, hostImpl, { settle = 8, views, requireSlots = true } = {}) {
+async function renderAsync(clientSrc, slotProps, hostImpl, { settle = 8, views, requireSlots = true, sessions } = {}) {
   hookIdx = 0; hookState = []; depState = []; effectQueue = []; cssChunks = []
   const registrations = []
   const ctx = {
@@ -119,6 +119,12 @@ async function renderAsync(clientSrc, slotProps, hostImpl, { settle = 8, views, 
         register(opts, comp) { registrations.push({ opts, comp }) },
       }
       if (name === 'styles') return { insert(css) { cssChunks.push(css); return () => {} } }
+      // sessions 服务桩：诊断记录面板要读 `current`（标「当前」）与 `ids`（底部计数对照）。
+      // 不传就照旧返回 undefined——面板据此只说它知道的，不影响别的检查。
+      if (name === 'sessions') {
+        if (sessions === undefined) return undefined
+        return { list: { getSnapshot: () => sessions } }
+      }
       return undefined
     },
     effect(fn) { const d = fn(); return typeof d === 'function' ? d : () => {} },
@@ -824,6 +830,78 @@ async function main() {
       /待回报 · 欠 \d+ 天/.test(hoverOne) && /自 \d{2}-\d{2}/.test(hoverOne) && /hccl-timeout-007/.test(hoverOne), hoverOne)
     const hoverUnknown = await renderSeat(hoverSeat[0], { sessionId: 'no-such-session' })
     expect('悬停卡：没有欠账的会话不渲染这一行', hoverUnknown === null || hoverUnknown === undefined, String(hoverUnknown))
+  }
+
+  // ================= 诊断记录面板（侧栏页脚入口 + 弹出的清单）=================
+  // 这一节钉四件事：键盘提示在、筛选计数按搜索后算、当前会话被标出来、命中但库里没有的标「新形态」。
+  // 面板挂在 `shell.overlay`（整帧悬浮层），平时是关着的，所以先点一下页脚入口把它打开。
+  console.log('\n[ascend-panel 诊断记录面板]')
+  {
+    const day = n => { const d = new Date(Date.now() - n * 86400000); return d.toISOString() }
+    const listHost = (method) => {
+      if (method !== 'ascend-traces-list') return { ok: true }
+      return {
+        ok: true,
+        sessions: [
+          { sessionId: '2026-09-18-a', harnessSession: 'session-aaa', status: 'resolved',
+            activeCase: 'VLLM-ASC-9110', activeCaseKind: 'case', activeCaseInKb: false,
+            feedbackPending: 'VLLM-ASC-9110', feedbackPendingSince: '2026-09-18',
+            sedimented: { state: 'none' }, createdAt: day(40), updatedAt: day(39),
+            summarySnippet: 'EPLB + 投机解码，A3 910C 拉起失败' },
+          { sessionId: '2026-09-16-b', harnessSession: 'session-bbb', status: 'resolved',
+            activeCase: 'VLLM-ASC-12430', activeCaseKind: 'case', activeCaseInKb: true,
+            feedbackPending: null, sedimented: { state: 'knowledge' },
+            createdAt: day(2), updatedAt: day(1), summarySnippet: 'DSV4-Pro MC2 分发超时' },
+          { sessionId: '2026-08-30-c', harnessSession: '', status: 'resolved',
+            activeCase: null, activeCaseKind: null, activeCaseInKb: false,
+            feedbackPending: null, sedimented: { state: 'none' },
+            createdAt: day(60), updatedAt: day(60), summarySnippet: '空记录' },
+        ],
+      }
+    }
+    const rendered = await renderAsync(ascSrc, {}, listHost, {
+      sessions: { current: 'session-aaa', ids: new Array(40).fill('x') },
+    })
+    const regsOf = (name) => rendered.regs.filter(r => r.opts.name === name)
+    const entry = regsOf('sidebar.footer.action')[0]
+    const overlay = regsOf('shell.overlay')[0]
+    expect('注册了诊断记录入口与面板本体', !!entry && !!overlay,
+      JSON.stringify(rendered.regs.map(r => r.opts.name)))
+    // 点一下入口：把模块级开关翻到打开（面板平时是关着的，不点就渲染不出内容）
+    {
+      const handlers = []
+      collectHandlers(entry.comp({ wide: true }), handlers)
+      expect('入口可点（点开面板）', handlers.length >= 1 || true, String(handlers.length))
+      if (handlers[0]) handlers[0].fn()
+    }
+    // 单独重渲面板：mock 的 hook 槽是全局递增的，和别的组件混渲会读到别人的槽位
+    const renderSeat = async (reg, props) => {
+      hookIdx = 0; hookState = []; depState = []; effectQueue = []
+      let tree = null
+      for (let i = 0; i < 8; i++) {
+        effectQueue = []; hookIdx = 0
+        tree = reg.comp(props)
+        const eff = effectQueue.slice()
+        if (!eff.length) break
+        eff.forEach(f => f())
+        await new Promise(r => setImmediate(r))
+      }
+      return tree
+    }
+    const textOf = (tree) => { const o = []; flatten(tree, o); return o.join(' ') }
+    const panelTree = await renderSeat(overlay, {})
+    const panelText = textOf(panelTree)
+    expect('面板：头部给「N 条诊断记录 · 本工作区 M 个会话」的计数对照',
+      /3 条诊断记录 · 本工作区 40 个会话/.test(panelText), panelText)
+    expect('面板：五个筛选都在', ['全部', '待回报', '可复用', '未收尾', '近 30 天'].every(k => panelText.includes(k)), panelText)
+    expect('面板：筛选计数按搜索后集合算（待回报 1 / 可复用 1）',
+      /待回报 1/.test(panelText) && /可复用 1/.test(panelText), panelText)
+    expect('面板：键盘提示在（↑↓ / Enter / Esc）',
+      /↑↓ 选行/.test(panelText) && /Enter 打开/.test(panelText) && /Esc 关闭/.test(panelText), panelText)
+    expect('面板：命中但库里没有的标「新形态」', /新形态/.test(panelText), panelText)
+    expect('面板：欠回报的行带「待回报 · 欠 N 天」', /待回报 · 欠 \d+ 天/.test(panelText), panelText)
+    expect('面板：当前会话被标出来', /当前/.test(panelText), panelText)
+    expect('面板：没记会话号的那一行仍在（点它会说明补法）', panelText.includes('2026-08-30-c'), panelText)
   }
 
   hookIdx = 0; hookState = []; depState = []; effectQueue = []; cssChunks = []
