@@ -252,6 +252,12 @@ trace 不止当过程记录读，还有第二个用途：换一个探索策略�
 
 **它也是单次成本的右边界。** 单次的总耗时与 token 按 `created_at` → `ended_at` 切窗口（`cost.window`）：会话账单记的是整条 harness 会话，同一段对话里做过两单时，两单会拿到同一份本会话累计，读数一模一样。不写 `ended_at` 时窗口退到 `updated_at`，明细里标 `bound_to: updated_at`、面板上写明——那个数之后可能混着诊断之外的活。
 
+## 建 trace 的入口
+
+用 `python3 scripts/trace_begin.py --slug <日期>-<issue 号>-<短名>` 起顶层 header：`session_id` / `harness_session` /
+`created_at` / `kb_rev` 都是派生值，由脚本填；`$DSH_SESSION_ID` 取不到时它**留空并说明**，不猜。
+之后每步只往 `trace[]` 追加事件（字段口径见本文件其余部分）。
+
 ## 顶层 `harness_session`（可选，一次写定）
 
 harness 侧的会话号（DSH 里是 `$DSH_SESSION_ID`）。**用途有两个**：收尾汇总时把这一次诊断与 harness 会话日志关联起来，读出逐次工具调用与 token 账单（会话日志里有这两样，轨迹里没有；轨迹里自己写一份是复制而不是关联，两边不一致时没有判据说该信哪一份）；以及让侧栏「待回报」标记能找到这一次诊断对应的会话行——标记按这个字段匹配，缺了它，欠回报的那一单在侧栏上就标不出来。
