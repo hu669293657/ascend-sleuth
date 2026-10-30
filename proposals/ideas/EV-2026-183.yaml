@@ -57,3 +57,7 @@ decisions:
     when: 2026-10-30
     type: decision
     conclusion: 采纳（validated）——策略从七处文本收进一个脚本，record-only 仍记信号，绕过路径归零
+  - who: agent
+    when: 2026-10-30
+    type: action
+    conclusion: "合入指针回写：本卡（及其结论）随 PR #387 进入 main（回写由 evolve 批次收尾执行，供判据「待合入积压」读取）"
