@@ -1,4 +1,9 @@
 # diagnosis_state.yaml —— 诊断状态 + 完整过程轨迹（trajectory）模板
+#
+# **优先用脚本起 header**：`python3 scripts/trace_begin.py --slug <日期>-<issue>-<短名>`——
+# harness_session / created_at / kb_rev / session_id 这几样是派生值，脚本填得准、也不会漏。
+# 本文件是**字段说明**（每个字段什么意思），不是让你照抄一遍再手填。
+
 # 实际文件按 session 命名：traces/<session_id>.yaml（每个并发诊断一个）
 # /diagnose 每个 step 后更新；/resume-diagnosis 读取续接；误诊归因读 trace；
 # 回放回归（scripts/replay_trace.py）与 fixture 生成（M3）以此为数据源。
