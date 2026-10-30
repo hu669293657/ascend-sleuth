@@ -112,6 +112,7 @@ def add(root: Path, *, signal: str, target: str, evidence: str, trajectory,
     else:
         doc = {
             "id": sid,
+            "status": "new",
             "signal": signal,
             "signal_text": signal_text,
             "target_component": target,
@@ -142,6 +143,42 @@ def collect(root: Path):
     return out
 
 
+STATUSES = ("new", "triaged", "promoted", "dropped")
+
+
+def find(root: Path, key: str):
+    """按文件名、id 或路径找一个信号文件（找不到返回 None）。"""
+    key = str(key).strip()
+    d = signals_dir(root)
+    if not d.is_dir():
+        return None
+    for p in sorted(d.glob("*.yaml")):
+        if key in (p.name, p.stem, p.stem.split("-")[-1]) or key == str(p):
+            return p
+        try:
+            if str(load(p).get("id")) == key:
+                return p
+        except Exception:
+            continue
+    return None
+
+
+def mark(root: Path, key: str, status: str, note: str = "") -> Path:
+    """推进一条信号的生命周期（new → triaged → promoted / dropped）。"""
+    if status not in STATUSES:
+        raise ValueError(f"status 必须是 {list(STATUSES)} 之一")
+    p = find(root, key)
+    if p is None:
+        raise ValueError(f"找不到信号：{key}")
+    doc = load(p)
+    doc["status"] = status
+    if note:
+        doc["status_note"] = note
+    doc["status_at"] = _now()
+    p.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return p
+
+
 def render_md(items, title: str = "") -> str:
     if not items:
         return ""
@@ -159,7 +196,7 @@ def render_md(items, title: str = "") -> str:
         traj = doc.get("trajectory") or []
         if traj:
             lines.append("- 出处：" + "；".join(f"`{t}`" for t in traj))
-        lines.append(f"- 记录：{doc.get('occurrences', 1)} 次，首次 {doc.get('first_seen', '—')}，"
+        lines.append(f"- 状态：{doc.get('status') or 'new'}；记录：{doc.get('occurrences', 1)} 次，首次 {doc.get('first_seen', '—')}，"
                      f"最近 {doc.get('last_seen', '—')}，来源 skill `{doc.get('source_skill', '—')}`")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -180,6 +217,11 @@ def main(argv=None):
     a.add_argument("--source", default="evolve-check", help="来源 skill")
     a.add_argument("--session", default="", help="会话 id（如有）")
 
+    m = sub.add_parser("mark", help="推进信号生命周期（new → triaged → promoted / dropped）")
+    m.add_argument("key", help="文件名、id 或路径")
+    m.add_argument("--status", required=True, choices=list(STATUSES), help="目标状态")
+    m.add_argument("--note", default="", help="一句话说明（为什么丢 / 为什么提升）")
+
     sub.add_parser("list", help="列出台账里的信号")
     sub.add_parser("export", help="导出成可粘贴的 issue / MR 描述")
 
@@ -191,6 +233,8 @@ def main(argv=None):
     e.add_argument("--since", default="", help="只要 first_seen >= 该日期（YYYY-MM-DD）")
     e.add_argument("--title", default="", help="覆盖标题")
     e.add_argument("--out", type=Path, default=None, help="写入文件（默认打到 stdout）")
+    e.add_argument("--status", nargs="*", default=None,
+                   help=f"只要这些状态（默认除 dropped）：{' '.join(STATUSES)}")
 
     args = ap.parse_args(argv)
     root = (args.root or repo_root()).resolve()
@@ -200,6 +244,15 @@ def main(argv=None):
                 trajectory=args.trajectory, suggested=args.suggested, source=args.source,
                 session=args.session, signal_text=args.signal_text)
         print(f"{r['path']}（{r['doc']['occurrences']} 次）")
+        return 0
+
+    if args.cmd == "mark":
+        try:
+            p = mark(root, args.key, args.status, args.note)
+        except ValueError as e:
+            print(f"✗ {e}", file=sys.stderr)
+            return 2
+        print(f"{p.name} → {args.status}")
         return 0
 
     try:
@@ -215,11 +268,13 @@ def main(argv=None):
             print(f"无信号记录（{signals_dir(root)}）")
         else:
             for p, d in items:
-                print(f"{p.name}  [{d.get('signal') or '—'}] {d.get('occurrences', 1)} 次  "
-                      f"{d.get('target_component')}")
+                print(f"{p.name}  [{d.get('status') or 'new'}] {d.get('signal') or '—'}  "
+                      f"{d.get('occurrences', 1)} 次  {d.get('target_component')}")
         return 0
 
     # export
+    keep = args.status if args.status is not None else [x for x in STATUSES if x != "dropped"]
+    items = [(p, d) for p, d in items if (d.get("status") or "new") in keep]
     if args.since:
         items = [(p, d) for p, d in items if str(d.get("first_seen", ""))[:10] >= args.since]
     items.sort(key=lambda pd: (-int(pd[1].get("occurrences") or 1), str(pd[1].get("last_seen", ""))),

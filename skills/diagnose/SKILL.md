@@ -232,5 +232,5 @@ reference 由流程里的**缺口**触发（**不是第四检索层**：不参�
 - 不要连续尝试第三个 case——**两次 fix 未解决**即转人工（误诊保护的串联保护；候选被排除不计入）
 - 不要把全量 profiler 灌进 context——裁剪到相关 rank + 栈尾
 - 不要用 interrupt 的 grep 思路建 precision 的 quickly_check（category 形态不同）
-- **不要直接改本 skill / triage / reference 等会进诊断上下文的资产——改进动作必须先产 EV 卡**（`scripts/ev_proposal.py --new`）再涉及。诊断中发现的流程改进（执行错/摩擦）走 `attribution`（执行错归因喂 component_tally）或 EV 卡（主动设计改进），**不混入本诊断 trace**。
+- **不要直接改本 skill / triage / reference 等会进诊断上下文的资产——改进动作必须先记录**：把观察交给 `python3 scripts/evolve_intake.py record …`（按部署声明落卡或落台账，别直接调 `ev_proposal.py --new`）再涉及。诊断中发现的流程改进（执行错/摩擦）走 `attribution`（执行错归因喂 component_tally）或 EV 卡（主动设计改进），**不混入本诊断 trace**。
 - 被打断 → `/skill:resume-diagnosis`

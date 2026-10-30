@@ -35,6 +35,8 @@ python3 scripts/evolve_signals.py add --signal T10 --signal-text "自审发现�
 | `trajectory` | 出处：产出 id、trace、replay 结果，可多条 |
 | `deployment` | 部署标识（与指标侧同口径） |
 | `first_seen` / `last_seen` / `occurrences` | 首次、最近、出现次数 |
+| `status` | `new` → `triaged`（分诊过）→ `promoted`（已产卡）/ `dropped`（不跟）；`export` 默认不导 `dropped` |
+| `status_note` / `status_at` | 改状态时的一句话理由与时间 |
 
 ## 边界
 

@@ -1,0 +1,59 @@
+id: EV-2026-183
+layer: L2
+target_component: scripts/evolve_intake.py
+title: 产卡动作散在七个 skill、脚本又没有门 → evolve_intake 单一入口 + 记录层契约 + 信号生命周期
+status: validated
+authorization: review
+dimension: evolvability
+supersedes: []
+superseded_by: null
+created_at: 2026-10-30
+source_signals:
+  - signal: human_feedback
+    evidence: 部署改成 record-only 后，用户提交 PR 仍产出 EV 卡；盘点发现七个产卡点只有 evolve-check 一处被声明门住
+    trajectory:
+      - "proposals/ideas/EV-2026-181.yaml"
+      - "skills/evolve-check/SKILL.md#评估步骤"
+  - signal: self_review_gap
+    evidence: 产卡策略写在七处散文里，脚本入口无门——任何 agent 直接跑 ev_proposal --new 都能绕过
+    trajectory:
+      - "skills/to-postmortem/SKILL.md#收尾"
+      - "skills/diagnose/SKILL.md#不做"
+hypothesis: 把产卡动作收到单一入口（先采集后分流）并给脚本加门之后，任何部署都不会绕过声明产卡，record-only 下也不会漏掉信号
+predicted_effect:
+  metric: 非 full 部署仍能产卡的入口数
+  from: "6（七个产卡点里只有 evolve-check 被门住）"
+  to: "0（全部走 intake；ev_proposal --new 硬门兜底）"
+  measure:
+    command: "rm -rf /tmp/intake-check && ASCEND_SLEUTH_EVOLUTION=record-only python3 scripts/evolve_intake.py --root /tmp/intake-check record --signal T10 --target triage:x --evidence 收尾原因串与面板解析不同源 --trajectory products/X-1"
+    expect_exit: 0
+    expect_stdout: "signal："
+validation:
+  method: scan_review
+  baseline: 七个产卡点各自判断；ev_proposal --new 无门
+  success_criteria: 单测覆盖三档分流、契约拒收、硬门与 --force、生命周期；七处正文统一指向 intake；人审确认没有遗留直接调 ev_proposal --new 的指令
+  rollback: 合入前丢弃分支；合入后 git revert（新增入口脚本删除、七处正文与模板回退）
+gate:
+  condition: "多用户开始用，值得记录的信号变多；而下游部署产卡会重号、又不能不记"
+risk: medium
+principle_refs: [2, 6, 8, 10, 11]
+actual_cost:
+  tokens: 0
+  note: 人工指派的机制改动，token 未单独记账
+decisions:
+  - who: agent
+    when: 2026-10-30
+    type: proposal
+    conclusion: 产卡动作收到单一入口 evolve_intake（先采集、后按 deployment.yaml 分流），ev_proposal --new 加硬门，台账加 new/triaged/promoted/dropped 生命周期
+  - who: agent
+    when: 2026-10-30
+    type: action
+    conclusion: 新增 scripts/evolve_intake.py 与 12 个单测；七处产卡正文统一指向 intake；ev_proposal --new 非 full 退 3（--force 逃生）；台账 mark 与 export 状态过滤；PR 模板两处改成卡或台账
+  - who: agent
+    when: 2026-10-30
+    type: eval
+    conclusion: 单测 12 个通过（三档分流、契约拒收、硬门、--force、生命周期）；measure 实跑 PASS；全量单测与 skill 自包含、docs-index 通过
+  - who: agent
+    when: 2026-10-30
+    type: decision
+    conclusion: 采纳（validated）——策略从七处文本收进一个脚本，record-only 仍记信号，绕过路径归零

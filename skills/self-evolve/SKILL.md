@@ -51,6 +51,8 @@ disable-model-invocation: true
 | 长期任务轮间信号 | task/session state | 下一轮范围决策 |
 | 下游部署交上来的信号台账 | `proposals/signals/`（`scripts/evolve_signals.py list`） | L2 卡：按台账里的组件与证据产卡 |
 
+**台账分诊（独立视角）**：读 `proposals/signals/` 时用 subagent 做一轮独立分诊——它只看台账与本仓卡库、不看本轮对话，避免同上下文盲区。分诊做三件事：合并重复、剔除只有结论没有现象且 `trajectory` 站不住的条目、按 `occurrences` 与影响排序，产出「建议产卡 / 建议丢弃 / 继续观察」。结论写回台账：`python3 scripts/evolve_signals.py mark <id> --status triaged|promoted|dropped --note "<一句话>"`。
+
 **深度轮不做的事**：不抓新数据、不沉淀内容（那属内容 skill + evolve-check）、不每轮全做——按对齐目标选信号源。
 
 ## 三、产卡 + 验证（深度轮与 evolve-check 共用同一条产卡链）
@@ -59,8 +61,9 @@ disable-model-invocation: true
    `scripts/ev_proposal.py --list`——同 trajectory/同 target 已有在池卡 → 合并；同
    target_component 历史结局（被改过/回滚过/有 rejected 结论）先读其 decisions，不重复
    被拒方案（`python3 scripts/ev_proposal.py --impact [组件]` 一次查全组件×尝试×结局）；
-2. 产骨架：`scripts/ev_proposal.py --new` → 填字段（layer / title / source_signals 带
-   trajectory / hypothesis / predicted_effect / validation / risk / principle_refs）；
+2. 落记录：把观察交给 `python3 scripts/evolve_intake.py record …`（`full` 落预填骨架，`record-only`
+   落信号台账，`off` 不落）→ 产卡时补字段（layer / hypothesis / predicted_effect / validation /
+   risk / principle_refs；`source_signals` 与 `target_component` 已由 intake 填好）；
    `predicted_effect` 须带 `measure`（预测的出处：命令 + 期望，或如实声明不可度量）——
    reviewer 靠 `scripts/ev_measure.py <卡号> --run` 机械复核预测，规则同 evolve-check 产卡链；
 3. **agent 自行验证执行**：按影响面分级选门禁（docs/guide/eval.md「门禁分级」可选层）——

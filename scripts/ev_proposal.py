@@ -69,7 +69,19 @@ def next_id(root: Path) -> str:
     return f"EV-{year}-{max_n + 1:03d}"
 
 
-def make_new(root: Path) -> Path:
+class DeploymentGate(Exception):
+    """部署声明不允许产卡（record-only / off）。调用方要把它翻成可照做的提示。"""
+
+
+def make_new(root: Path, force: bool = False) -> Path:
+    if not force:
+        import evolve_mode as EM
+        mode, source = EM.read_mode(root)   # 声明写坏时抛 ModeError，调用方翻成提示
+        if mode != "full":
+            raise DeploymentGate(
+                f"本部署 evolution.mode={mode}（{source}）：不产卡。"
+                f"记录观察请用 python3 scripts/evolve_intake.py record（它自动写信号台账）；"
+                f"演练或确需本地建档再加 --force。")
     cid = next_id(root)
     tpl = root / TEMPLATE
     out = root / IDEAS_DIR / f"{cid}.yaml"
@@ -400,6 +412,8 @@ def main():
     ap = argparse.ArgumentParser(description="self-evolve 产卡辅助")
     ap.add_argument("--next", action="store_true", help="打印下一个卡号")
     ap.add_argument("--new", action="store_true", help="生成新卡骨架")
+    ap.add_argument("--force", action="store_true",
+                    help="配合 --new：跳过部署声明门（演练 / 测试 / 确需本地建档）")
     ap.add_argument("--list", action="store_true", help="列现有卡")
     ap.add_argument("--mark-merged", metavar="PR", nargs="?", const="",
                     help="把合入指针回写进卡的 decisions（追加，保留注释）；"
@@ -426,11 +440,20 @@ def main():
         print(next_id(root))
     elif args.new:
         try:
-            p = make_new(root)
+            p = make_new(root, force=args.force)
+        except DeploymentGate as e:
+            print(f"ev_proposal: 拒绝产卡——{e}", file=sys.stderr)
+            sys.exit(3)
         except FileExistsError as e:
             # 覆盖保护触发：非零退出 + 一行可读原因（不抛 traceback，agent 能直接照做）
             print(f"ev_proposal: 拒绝产卡——{e}", file=sys.stderr)
             sys.exit(2)
+        except Exception as e:
+            # 部署声明写坏（ModeError）走退出 2；其余异常照常抛，不吞
+            if e.__class__.__name__ == "ModeError":
+                print(f"ev_proposal: 部署声明写坏——{e}", file=sys.stderr)
+                sys.exit(2)
+            raise
         print(f"已生成骨架: {p}")
         print(f"ID: {p.stem} —— 按 examples/sample-idea.yaml 填字段后跑 verify_proposals.py")
     elif args.list:

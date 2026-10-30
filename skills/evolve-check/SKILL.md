@@ -107,19 +107,18 @@ python3 scripts/evolve_mode.py --json      # → {"mode": "full" | "record-only"
 
 **第 3 步：产卡 + 自行验证（有信号时，agent 自动完成，不等用户）**：
 
-> **`record-only` 分支**：本步不产卡（卡号按检出递增，两个仓各产各的会重号），改为写信号台账——同一节报出的每条信号一条命令，重复出现会自己累加次数，不必先去重：
+> **记录动作统一走入口脚本**：本步不直接调 `ev_proposal.py --new`（非 `full` 部署会被它拒绝），而是把观察交给：
 >
 > ```
-> python3 scripts/evolve_signals.py add --signal T10 --signal-text "自审发现的缺口" \
->   --target <要改的组件：skill 路径 / 脚本名> --evidence "<一句话证据，不含客户原文>" \
->   --trajectory "<产出 id / trace / replay 结果>" --suggested "<建议动作，没有方案可留空>" \
+> python3 scripts/evolve_intake.py record --signal T10 --signal-text "自审发现的缺口" \
+>   --target <要改的组件：仓库内路径或组件名> --evidence "<一句话现象，不含客户原文>" \
+>   --trajectory "<产出 id / trace / replay 结果>" --suggested "<建议动作，可留空>" \
 >   --source <上游 skill>
 > ```
 >
-> 台账随 PR 提交（`proposals/signals/`，一条信号一个文件）。收尾说明里给出台账条数，并提示拿批的人可以跑 `python3 scripts/evolve_signals.py export` 生成可粘贴的 issue / MR 描述。后续步骤（查重、产骨架、验证门、judgement）整段跳过。
+> 它按部署声明分流：`full` 落一张预填好的卡骨架（`source_signals` 已填，`measure` 留空待设计），`record-only` 落 `proposals/signals/`（一条信号一个文件，同内容自动累加次数），`off` 不落。载荷先于分流固定，所以任何模式都不会丢信号。
 >
-> **只记现场，不做验证**：本档不跑实验、不设计验证、不写预测与目标值。已经跑过的命令与输出可以写进 `--evidence`，没跑过的不许编——下游凑出来的判据上游不会采信，反而把「现象」污染成「结论」。判优先级、读组件、写 `measure`、跑验证都在上游手动跑深度轮时做。
-
+> `record-only` 下到此为止：查重、验证门、judgement 整段跳过；收尾说明给出台账条数，提示拿批的人跑 `python3 scripts/evolve_signals.py export` 生成可粘贴的 issue / MR 描述。**不做实验、不写预测**——已跑过的命令可以写进 `--evidence`，没跑过的不许编。
 
 1. **先读候选水位**（产卡前的机械检查，别靠自觉）：`python3 scripts/ev_proposal.py --waterline`
    ——输出「待回写/待合入 N（上限 20）」，**超限退 1**；退 1 时本轮**只记信号不产卡**，先消化积压
