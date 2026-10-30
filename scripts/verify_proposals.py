@@ -67,6 +67,25 @@ MEASURE_CUTOVER = datetime.date(2026, 9, 11)
 # 与 measure 同一条纪律：**只对生效日之后的卡强制**，存量不追溯（补写会形成事后叙述）。
 TARGET_CUTOVER = datetime.date(2026, 9, 17)
 
+# 分支记录与自指度量的生效日：与 measure / target 同一条纪律——只对生效日之后的卡强制，
+# 存量不追溯（给旧卡补"当时还考虑过什么"只会造事后叙述，原则十）。
+ALTERNATIVES_CUTOVER = datetime.date(2026, 10, 31)
+EXTERNAL_CUTOVER = datetime.date(2026, 10, 31)
+
+# 演进流程本身的落点。改这些文件的卡，`measure` 常常只能证明"脚本还能跑"——那不足以证明
+# "流程变好了"。所以它们额外要一条独立于该流程的效果信号（predicted_effect.external）。
+EVOLUTION_FLOW = {
+    "skills/evolve-check/SKILL.md",
+    "skills/self-evolve/SKILL.md",
+    "scripts/ev_proposal.py",
+    "scripts/ev_measure.py",
+    "scripts/evolve_mode.py",
+    "scripts/evolve_intake.py",
+    "scripts/evolve_signals.py",
+    "scripts/verify_proposals.py",
+    "proposals/signals/README.md",
+}
+
 # 占位符检测：产卡骨架（examples/sample-idea.yaml）刻意留占位 measure，让"忘了填"在 CI 上
 # 响亮失败，而不是带着一条假命令过审（假 command + 自洽的期望 = 假绿，原则十）。
 # 只认显式占位词，不收 `[<>]`——shell 重定向与进程替换（`> out`、`<(a)`）是合法命令形态。
@@ -310,6 +329,70 @@ def age_days(value, today=None):
     return ((today or datetime.date.today()) - d).days
 
 
+def check_branches_and_self_reference(root: Path, errors: list):
+    """跨卡检查：分支记录（alternatives）与演进流程卡的自指度量。
+
+    - 同组件有 rejected / superseded 先例时，新卡必须写清"为什么不重走那条"——否则同一方向
+      会被反复重试（先例视图 `ev_proposal.py --impact` 存在，但没人被要求读它的结论）。
+    - 改演进流程的卡，`measure` 往往只能证明实现可用；效果必须有流程之外的信号。
+    """
+    ideas = root / "proposals" / "ideas"
+    docs = []
+    for f in sorted(ideas.glob("*.yaml")):
+        d = load_yaml(f)
+        if isinstance(d, dict):
+            docs.append((f, d))
+
+    by_target = {}
+    for f, d in docs:
+        tc = d.get("target_component")
+        if isinstance(tc, str) and tc.strip():
+            by_target.setdefault(tc.strip(), []).append((f, d))
+
+    for f, d in docs:
+        created = as_date(d.get("created_at"))
+        alt = d.get("alternatives")
+
+        # 形状：给了就必须是 {option, why_rejected} 列表（evidence 可选）
+        if alt is not None:
+            if not isinstance(alt, list) or not alt:
+                errors.append(f"{f}: alternatives 必须是非空列表")
+            else:
+                for i, a in enumerate(alt):
+                    if not isinstance(a, dict):
+                        errors.append(f"{f}: alternatives[{i}] 必须是 mapping")
+                        continue
+                    for k in ("option", "why_rejected"):
+                        if not str(a.get(k) or "").strip():
+                            errors.append(f"{f}: alternatives[{i}] 缺 {k}——只有选项、没有"
+                                          "否决理由的记录挡不住重试")
+
+        tc = d.get("target_component")
+        tc = tc.strip() if isinstance(tc, str) else ""
+        if created is None or not tc:
+            continue
+
+        # 分支记录：同组件有失败结局的先例
+        if created >= ALTERNATIVES_CUTOVER:
+            prior = [x for x in by_target.get(tc, [])
+                     if x[0] != f and x[1].get("status") in {"rejected", "superseded"}]
+            if prior and not (isinstance(alt, list) and alt):
+                names = "、".join(x[0].stem for x in prior[:3])
+                errors.append(f"{f}: 同组件有失败先例（{names}），缺 alternatives——"
+                              "写清「为什么不重走那条」才能过；先例视图 ev_proposal.py --impact")
+
+        # 自指度量：改演进流程的卡要有流程外的效果信号
+        if created >= EXTERNAL_CUTOVER and tc in EVOLUTION_FLOW:
+            pe = d.get("predicted_effect")
+            ext = pe.get("external") if isinstance(pe, dict) else None
+            if not str(ext or "").strip():
+                errors.append(f"{f}: 改的是演进流程（{tc}），缺 predicted_effect.external——"
+                              "measure 只能证明脚本能跑，效果信号要来自流程之外"
+                              "（如台账提升率、intake 拒收率、no-signal 比率、单卡合入天数）")
+            elif str(ext).strip() == tc:
+                errors.append(f"{f}: predicted_effect.external 不能指回被改的组件本身（自指度量不可证伪）")
+
+
 def resolve_supersedes(root: Path, errors: list, ids: dict):
     """supersedes/superseded_by 交叉引用校验（须在收集完所有 id 后跑）。"""
     for f in sorted((root / "proposals" / "ideas").glob("*.yaml")):
@@ -344,6 +427,7 @@ def main():
     for f in sorted(ideas_dir.glob("*.yaml")):
         check_idea(f, ids, errors)
     resolve_supersedes(root, errors, ids)
+    check_branches_and_self_reference(root, errors)
 
     if errors:
         print(f"verify_proposals: {len(errors)} 个问题")
