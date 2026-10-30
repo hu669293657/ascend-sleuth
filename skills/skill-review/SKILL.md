@@ -31,7 +31,7 @@ disable-model-invocation: true
   把它做成硬门 = 假硬化，比没有检查更坏——它制造虚假的安全感。强度如实标注为"判断"。
 - **不替代 golden / S2 / ixn**：那三个管正确性与交互**回归**；本 skill 的结论不推翻它们，也不被它们替代。
 - **不作为验收证据**：pilot 级样本（每格 1–3 次）只作方向性判据，报告必须写清样本量。
-- **不自动改 skill**：发现该改的，产 EV 卡走既有流程（建议与决定分离）。
+- **不自动改 skill**：发现该改的，用 `python3 scripts/evolve_intake.py record …` 落记录（按部署声明落卡或台账），走既有流程（建议与决定分离）。
 - **不给自己开后门**：本协议自身的改动与其他 skill 同等（走 methodology PR + 双签，不因"它是评审者"而降级），
   且每轮审视的**首个动作**是先用**档 0 审自己**——本文件的篇幅/强制词/预算档是否还成立。
 
@@ -128,7 +128,7 @@ python3 scripts/audit_skill_cost.py --skill <name> --dups   # 常驻/按需/重�
 
 - **报告** → `proposals/reviews/skill-review-<skill>-<yyyy-mm-dd>.md`（本地留存，不进 git）：
   每个视角一节（做了什么 / 样本量 / 观察 / 判断 / 建议），末节"结论与优先级"（按"用户可感知程度 × 修复成本"排序）；
-- 有**具体可执行**的改进 → 产 EV 卡（走 `/skill:evolve-check` 第 3 步的同一条产卡链）；
+- 有**具体可执行**的改进 → 走 `/skill:evolve-check` 第 3 步的同一条链：`python3 scripts/evolve_intake.py record …`；
 - **不把数字型"基线"写进 skill 文本**——基线随 skill 变更腐烂，只进报告。
 
 ## 与既有机制的关系

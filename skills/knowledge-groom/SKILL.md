@@ -218,8 +218,8 @@ disable-model-invocation: true
 
 批审产出、出变更摘要前，执行一次伴随演进评估（`read skills/evolve-check/SKILL.md`
 遵循；**先按它的第 0 步读部署声明，`record-only` / `off` 下不产卡**）：本轮暴露覆盖缺口（T2）、容量格子压线/健康指标恶化（T6）、reference 家族需扩
-（T5）、或批审环节有重复手动动作与流程摩擦（T3/T4）时，**agent 自动产 idea 卡并自行验证
-执行**（ev_proposal 产卡 → 验证 → 进攒批）；无信号则摘要加一行"evolve-check：无演进信号"。
+（T5）、或批审环节有重复手动动作与流程摩擦（T3/T4）时，**agent 自动记录并产卡**：观察交给
+`python3 scripts/evolve_intake.py record …`（按部署声明落卡或落台账），产卡后接验证 → 进攒批；无信号则摘要加一行"evolve-check：无演进信号"。
 这是流程默认收尾，**不需要用户另说"改进系统"**。
 
 > 为什么 groom 也要挂：groom 是**批量改动知识库的收尾动作**（升格 / 退休 / 汇总使用记录），

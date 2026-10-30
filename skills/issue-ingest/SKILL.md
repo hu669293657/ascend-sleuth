@@ -132,8 +132,9 @@ python3 scripts/issue_filter.py --state ingest-state.json \
 补 case 走 `/skill:to-postmortem`。**归纳 reference 只在 case 已升格入库后做**——本管道直接
 升格的批次可当轮做；落在 inbox 等周批的只记信号，由 `knowledge-groom` 的 R8 执行
 （`sources[].cases` 不得引用未升格的草稿 id，CI 会红）；
-只有信号连带要求改**行为面**（triage 分支、skill 步骤、闸门绑定、索引形态）时，才
-`scripts/ev_proposal.py --new` 产卡并自行验证执行（产卡 → golden/S2 验证 → 进攒批）；
+只有信号连带要求改**行为面**（triage 分支、skill 步骤、闸门绑定、索引形态）时，才把观察交给
+`python3 scripts/evolve_intake.py record …`（按部署声明落卡或落台账，别直接调 `ev_proposal.py --new`；
+产卡后接 golden/S2 验证 → 进攒批）；
 无信号则报告加一行"evolve-check：无演进信号"。这是流程默认收尾，**不需要用户另说
 "改进系统"**——演进由数据触发，像人学习。产出与流程报告一并给出。
 
