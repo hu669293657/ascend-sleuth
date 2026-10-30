@@ -2477,6 +2477,8 @@ return {
                   category: { type: 'string' },
                   activeCase: { type: 'string' },
                   feedbackPending: { type: 'string' },
+                  harnessSession: { type: 'string' },
+                  missingHarnessSession: { type: 'boolean' },
                   userSteps: { type: 'number' },
                   agentSteps: { type: 'number' },
                 },
@@ -2493,9 +2495,19 @@ return {
             (x.framework || '') + (x.category ? '/' + x.category : '') +
             (x.activeCase ? ' 命中:' + x.activeCase : '') +
             (x.feedbackPending ? ' ⏳feedback:' + x.feedbackPending : '') +
+            (x.missingHarnessSession ? ' ⚠缺会话号' : '') +
             ' (' + x.userSteps + 'u/' + x.agentSteps + 'a)'
           )
-          return [{ type: 'text', text: v.sessionCount + ' 个诊断会话:\n' + lines.join('\n') }]
+          // 缺顶层 harness_session 时说清"这单没法从面板/侧栏挂到会话上"，并给就地补法。
+          // 写侧漏写过的单会一直在这里露头，直到补上——比等人从面板上发现早一步。
+          const missing = s.filter(x => x.missingHarnessSession).map(x => x.sessionId)
+          const tail = missing.length
+            ? '\n\n⚠ ' + missing.length + ' 单缺顶层 harness_session（面板与侧栏挂不到会话上）：'
+              + missing.join('、')
+              + '\n补法（已知本会话号时秒级，不扫日志）：'
+              + 'python3 scripts/link_harness_sessions.py --trace <文件名> --session-id "$DSH_SESSION_ID" --apply'
+            : ''
+          return [{ type: 'text', text: v.sessionCount + ' 个诊断会话:\n' + lines.join('\n') + tail }]
         },
       },
       async execute(args) {
@@ -2508,7 +2520,10 @@ return {
           sessions: r.sessions.map(s => ({
             sessionId: s.sessionId, status: s.status, framework: s.framework,
             category: s.category, activeCase: s.activeCase || '',
-            feedbackPending: s.feedbackPending || '', userSteps: s.userSteps, agentSteps: s.agentSteps,
+            feedbackPending: s.feedbackPending || '',
+            harnessSession: s.harnessSession || '',
+            missingHarnessSession: !s.harnessSession,
+            userSteps: s.userSteps, agentSteps: s.agentSteps,
           })),
         }
       },

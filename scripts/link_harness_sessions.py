@@ -33,6 +33,8 @@
   python3 scripts/link_harness_sessions.py                 # dry-run：打印将补的映射与依据
   python3 scripts/link_harness_sessions.py --apply          # 写进轨迹（每单插一行）
   python3 scripts/link_harness_sessions.py --trace <名字>   # 只处理某一单（调试用）
+  python3 scripts/link_harness_sessions.py --trace <名字> --session-id "$DSH_SESSION_ID"
+                                                          # 已知会话号时直接写，不扫日志（秒级）
   python3 scripts/link_harness_sessions.py --sessions-root <目录>   # 指定会话日志根（测试用）
 
 退出码：0 = 成功（含"没有要补的"）；2 = 参数或环境不可用。
@@ -51,6 +53,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from exec_log_path import resolve_traces  # noqa: E402  （typo-safe：运行时件锚主检出）
 from trace_entry_activity import (  # noqa: E402  （同目录复用，不复制一份会话日志口径）
     HARNESS_LOG_PATTERNS,
     harness_homes,
@@ -130,7 +133,9 @@ def log_bounds(text: str):
 
 
 def trace_files(root: Path):
-    d = root / TRACES_REL
+    """轨迹文件列表。**目录解析到主检出**：在 worktree 里跑时本检出的 traces/ 不存在
+    （它是 gitignored 运行时件，只落在主检出），不解析就会得到"没有缺字段的轨迹"这种假绿。"""
+    d = resolve_traces(root)
     if not d.is_dir():
         return []
     return sorted(p for p in d.glob("*.yaml") if p.is_file())
@@ -236,6 +241,8 @@ def main() -> int:
                     help='连「只按命中次数」定到的也写（弱证据；默认只打印不写）')
     ap.add_argument("--trace", default=None, help="只处理某一单（名字或文件名）")
     ap.add_argument("--sessions-root", default=None, help="会话日志根目录（默认自动探测）")
+    ap.add_argument("--session-id", default=None,
+                    help="已知的 harness 会话号（如 $DSH_SESSION_ID）；给了就不扫日志，直接写这一单")
     ap.add_argument("--repo", default=str(Path(__file__).resolve().parent.parent), help="仓库根")
     args = ap.parse_args()
 
@@ -252,6 +259,29 @@ def main() -> int:
             targets.append((p, text))
     if not targets:
         print("没有缺 harness_session 的轨迹（已有的不覆盖）。")
+        return 0
+
+    # 已知会话号时不必扫日志：写侧漏写的那一单当场就能补（扫日志要几十秒，还得名字在日志里）。
+    if args.session_id:
+        sid = args.session_id.strip()
+        if not sid.startswith('session-'):
+            print('--session-id 需要 DSH 会话号（形如 session-<uuid>），拿到的是：' + sid, file=sys.stderr)
+            return 2
+        written = 0
+        for p, _text in targets:
+            text = p.read_text(encoding="utf-8")
+            if not needs_link(text):
+                continue
+            if args.apply:
+                p.write_text(insert_field(text, sid), encoding="utf-8")
+                written += 1
+                print(f"  已写 {p.name} → {sid}")
+            else:
+                print(f"  将写 {p.name} → {sid}")
+        if not args.apply:
+            print("\n（dry-run：加 --apply 才写进轨迹）")
+        else:
+            print(f"已补 {written} 单。")
         return 0
 
     slugs = {slug_of(p, t) for p, t in targets}

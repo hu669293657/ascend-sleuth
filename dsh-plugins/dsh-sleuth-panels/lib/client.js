@@ -1,6 +1,6 @@
 /* eslint-disable */
 // 生成物 —— 勿手改。由 `node scripts/build_panel_bundle.js` 从下列源文件拼出：
-//   dsh-plugins/ascend-panel/panel-client.js  (sha256:39611429d905)
+//   dsh-plugins/ascend-panel/panel-client.js  (sha256:9f455daf5327)
 //   dsh-plugins/ev-panel/panel-client.js  (sha256:f684735469ce)
 //   dsh-plugins/sleuth-console/console-client.js  (sha256:119062e6c579)
 // 校验：`node scripts/build_panel_bundle.js --check`。
@@ -70,7 +70,7 @@ window.__ModuleLoader__.load({
       id: 'ascend-panel',
       build(host, styles) {
         return (function () {
-// ---- dsh-plugins/ascend-panel/panel-client.js (sha256:39611429d905) 原文开始 ----
+// ---- dsh-plugins/ascend-panel/panel-client.js (sha256:9f455daf5327) 原文开始 ----
 return {
   apply(ctx) {
     const slots = ctx.get('slots')
@@ -467,7 +467,7 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
     // 构建时注入的面板包版本（`scripts/build_panel_bundle.js` 把占位符换成 package.json 的 version）。
     // 为什么要有：面板是「装进 profile 的常驻插件 + 浏览器按 rev 缓存」两层，改完看不到新版时
     // 无法区分"装的还是旧包"与"浏览器缓存了旧 bundle"。有这个串，一眼就能判。
-    const PANEL_VERSION = '0.7.9'
+    const PANEL_VERSION = '0.8.0'
 
     function shortUrl(u) {
       const s = String(u).replace(/^https?:\/\//i, '')
@@ -2314,8 +2314,10 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
             style: { background: 'transparent', border: '1px solid ' + T.brand, color: T.brand, borderRadius: 'var(--r-pill)', padding: '2px 11px', fontSize: 'var(--t-tiny)', fontWeight: 600, cursor: 'pointer' },
           }, '打开会话')
         : React.createElement('span', {
-            title: '这单的轨迹没记 harness_session（写入该字段之前的单），定位不到 DSH 会话。'
-              + '补法：python3 scripts/link_harness_sessions.py --apply',
+            title: '这单的轨迹顶层没有 harness_session，定位不到 DSH 会话（session_id 是诊断自己起的名字，'
+              + '不是 DSH 的会话号）。可能是建会话时漏写，也可能是那次写入该字段之前的单——面板看不出是哪种，'
+              + '只说事实。补法（已知本会话号时秒级）：'
+              + 'python3 scripts/link_harness_sessions.py --trace ' + String(s.file || '') + ' --session-id "$DSH_SESSION_ID" --apply',
             style: { color: T.text2, fontSize: 'var(--t-tiny)', border: '1px dashed ' + T.border, borderRadius: 'var(--r-pill)', padding: '2px 10px' },
           }, '未记会话号')
       // 展开的命令块只出现一次（谁被点开就显示谁）；选中关系靠"命令块在最下方"表达，
@@ -4300,8 +4302,9 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
           return
         }
         if (!target) {
-          setNavMsg('这单的轨迹没记 harness_session（写入该字段之前的单），定位不到会话；'
-            + '补法：python3 scripts/link_harness_sessions.py --apply')
+          setNavMsg('这单的轨迹顶层没有 harness_session，定位不到会话（session_id 不是 DSH 会话号）。'
+            + '可能是建会话时漏写，也可能是旧单；补法：'
+            + 'python3 scripts/link_harness_sessions.py --trace ' + String(row.file || '') + ' --session-id "$DSH_SESSION_ID" --apply')
           return
         }
         openSession(target).then(res => {

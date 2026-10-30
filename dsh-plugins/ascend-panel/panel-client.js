@@ -2241,8 +2241,10 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
             style: { background: 'transparent', border: '1px solid ' + T.brand, color: T.brand, borderRadius: 'var(--r-pill)', padding: '2px 11px', fontSize: 'var(--t-tiny)', fontWeight: 600, cursor: 'pointer' },
           }, '打开会话')
         : React.createElement('span', {
-            title: '这单的轨迹没记 harness_session（写入该字段之前的单），定位不到 DSH 会话。'
-              + '补法：python3 scripts/link_harness_sessions.py --apply',
+            title: '这单的轨迹顶层没有 harness_session，定位不到 DSH 会话（session_id 是诊断自己起的名字，'
+              + '不是 DSH 的会话号）。可能是建会话时漏写，也可能是那次写入该字段之前的单——面板看不出是哪种，'
+              + '只说事实。补法（已知本会话号时秒级）：'
+              + 'python3 scripts/link_harness_sessions.py --trace ' + String(s.file || '') + ' --session-id "$DSH_SESSION_ID" --apply',
             style: { color: T.text2, fontSize: 'var(--t-tiny)', border: '1px dashed ' + T.border, borderRadius: 'var(--r-pill)', padding: '2px 10px' },
           }, '未记会话号')
       // 展开的命令块只出现一次（谁被点开就显示谁）；选中关系靠"命令块在最下方"表达，
@@ -4227,8 +4229,9 @@ body[data-ds-dark-theme] .sleu{--c-blue:#7db3fc;--c-green:#5cd68f;--c-purple:#b3
           return
         }
         if (!target) {
-          setNavMsg('这单的轨迹没记 harness_session（写入该字段之前的单），定位不到会话；'
-            + '补法：python3 scripts/link_harness_sessions.py --apply')
+          setNavMsg('这单的轨迹顶层没有 harness_session，定位不到会话（session_id 不是 DSH 会话号）。'
+            + '可能是建会话时漏写，也可能是旧单；补法：'
+            + 'python3 scripts/link_harness_sessions.py --trace ' + String(row.file || '') + ' --session-id "$DSH_SESSION_ID" --apply')
           return
         }
         openSession(target).then(res => {
